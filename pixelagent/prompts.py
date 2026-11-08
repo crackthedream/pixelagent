@@ -80,3 +80,32 @@ verdict: pass if overall >= 8 and no high-severity issue, else repair.
 Size convention (by design, do not report it as an issue): height_px is the sprite's height INCLUDING its
 outline; the canvas adds a transparent margin on every side, so the canvas is larger than height_px.
 Objective lint results: {lint}"""
+
+ANIM_PLAN = """You plan a pixel-art sprite animation for an approved game character (images: the approved sprite,
+then its concept art). User request: "{request}".
+Decide the number of frames (follow the request if it gives one; otherwise 4-8, at most 12), whether it loops,
+whether it plays in place, and for each frame a concrete, drawable pose: body lean and height, each arm and leg,
+held items, hair/cloth secondary motion. Use classic pixel-art timing: 80-150 ms per frame, hold key poses longer.
+Keep the sprite's view ({view}) and design. List what moves and what must stay identical in every frame."""
+
+POSE_SHEET = """A horizontal pose reference sheet of {n} animation frames of THIS exact character (same design,
+colours, proportions, costume and props as the reference images), {view} view. The {n} frames stand in ONE row,
+evenly spaced from left to right with clear empty space between them, all at the same scale, all standing on the
+same ground line, full body visible, no overlap. Plain flat light-grey background, no text, no numbers, no borders,
+no shadows. Animation: {summary}. Frames, left to right:
+{frames}"""
+
+ANIM_FRAME = """You are animating the game character '{name}' with the pixelliner tools: frame {k1} of {n} of the
+'{anim}' animation. Pose for this frame: {pose}
+
+The canvas has {n} frames. Layer 'drawing' is the sprite; for this frame it starts as a copy of {start}. Layer
+'reference' (never exported) holds this frame's pose trace, converted from a pose sketch: follow it for the POSE
+(where the body, limbs, held items, hair and cloth are), but keep the character's DESIGN exactly as the model sheet
+(the approved sprite): same palette keys, outline style, face, details and proportions. Change only what moves;
+leave everything else pixel-identical so the animation does not flicker.
+Always pass frame={k} to draw, view and compare_reference. `compare_reference` (frame={k}) shows where this frame
+differs from the trace (red = missing, blue = extra); `view` with onion=true ghosts the previous frame; `view`
+mode 'grid' with a small region reads exact pixels (layer 'drawing' or 'reference'). Typical work: clear the moved
+parts (draw op 'clear' with a region, or pixel_map with '.'), redraw them at the new position with pixel_map in the
+same colours, keep the outline continuous. Must stay identical: {constant}.
+Budget: about {turns} rounds. Call `finish` when the frame matches the pose and the design."""

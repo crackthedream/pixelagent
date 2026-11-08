@@ -21,7 +21,8 @@ def run(ctx):
         return
     doc = ctx.load_project("polish")
     trace = ctx.save_image("trace", "trace.png", imaging.from_bytes(doc.w, doc.h, doc.composite()))
-    if ctx.cfg["backend"]["mode"] == "dry_run":
+    from ..models import StubLLM
+    if isinstance(ctx.backend.llm, StubLLM):
         # a stub model cannot draw: pass the polished sprite through so the pipeline still runs end to end
         ctx.save_project("project", doc)
         ctx.save_image("preview", "artist.png", imaging.load_rgba(trace))

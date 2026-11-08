@@ -87,6 +87,13 @@ face_turns = 12
 face_pass = true
 effort = "medium"
 
+[animation]
+sheet_size = "1536x1024"     # pose sheet: all frames in one row
+sheet_quality = "medium"
+turns_per_frame = 14         # artist rounds per frame (each frame starts from the previous one)
+max_usd = 4.0                # cap for the drawing of one animation (upper bound)
+effort = "medium"
+
 [detail]
 enabled = true
 max_regions = 4              # focal regions refined per sprite (face, hands, held items...)

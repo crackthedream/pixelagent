@@ -56,6 +56,23 @@ class RegionVariants(BaseModel):
     variants: list[RegionEdit]
 
 
+class FramePlan(BaseModel):
+    index: int
+    pose: str = Field(description="Concrete pose: body, each limb, held items, hair/cloth secondary motion")
+    duration_ms: int = Field(110, ge=20, le=2000)
+
+
+class AnimationSpec(BaseModel):
+    """An animation planned from the user's prompt for an approved character."""
+    name: str
+    summary: str = ""
+    frames: list[FramePlan] = Field(description="2-12 frames in order")
+    loop: bool = True
+    in_place: bool = Field(True, description="True: the character animates on the spot (walk cycles in place)")
+    moves: list[str] = Field(default_factory=list, description="What moves between frames")
+    constant: list[str] = Field(default_factory=list, description="What must stay identical in every frame")
+
+
 class Pick(BaseModel):
     """A model's choice among numbered candidates."""
     index: int = Field(description="0-based index of the best candidate")

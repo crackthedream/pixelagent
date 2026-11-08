@@ -5,7 +5,6 @@ like a pixel artist: study -> palette -> silhouette -> flats -> shading -> lines
 using draw/view/compare_reference/lint/undo over MCP. Every tool call and its cost are logged; spend and turns
 are capped. Output: PNG + layered project + transcript + metrics.
 """
-import base64
 import json
 import math
 import os
@@ -13,9 +12,9 @@ import time
 
 from . import imaging
 from .config import load_engine
+from .agent_session import DEFAULT_TOOLS as ALLOWED_TOOLS, AgentSession
 from .mcp_client import MCPClient
 
-ALLOWED_TOOLS = ("palette", "draw", "layer", "view", "lint", "undo", "redo", "compare_reference", "canvas")
 
 INSTRUCTIONS = """You are a professional pixel artist. You draw a {height}-px-tall game sprite yourself, using only the
 pixelliner tools, so that it matches the reference character.
@@ -40,20 +39,6 @@ Work in phases, and check with `view` (image) or `compare_reference` at the end 
 Rules: integer pixel coordinates, origin top-left. Batch many ops per `draw` call. `view` mode 'grid' with a small
 region (x, y, width, height) shows exact pixels as text when you need precision. Budget: about {turns} tool rounds;
 images are expensive, so view/compare only when you need to check. When done, call `finish` with a short summary."""
-
-
-def _schema(tool):
-    s = dict(tool.get("inputSchema") or {"type": "object", "properties": {}})
-    s.setdefault("type", "object")
-    s.setdefault("properties", {})
-    return s
-
-
-def _price(cfg, model, usage):
-    p = cfg.get("pricing", {}).get(model, {})
-    if usage is None:
-        return 0.0
-    return (usage.input_tokens * p.get("input", 0) + usage.output_tokens * p.get("output", 0)) / 1e6
 
 
 HYBRID_INSTRUCTIONS = """You are a professional pixel artist producing the FINAL {height}-px-tall game sprite of this
@@ -164,7 +149,6 @@ def run_artist(project, asset_id, reference, height=64, client=None, model=None,
     if client is None:
         from .openai_backend import make_client
         client = make_client(cfg)
-    from .openai_backend import image_data_url
     model = model or cfg["models"].get("artist", cfg["models"]["detail"])
     style = cfg["style"]
     margin = int(style.get("canvas_margin", 2))
@@ -188,9 +172,8 @@ def run_artist(project, asset_id, reference, height=64, client=None, model=None,
                       "palette": "none", "opacity": 0.35, "layer_name": "reference"}
 
     mcp = MCPClient(os.path.join(engine, "server.py"), env={"PIXELLINER_MCP_OUT": out})
-    transcript = open(os.path.join(out, "transcript.jsonl"), "a", encoding="utf-8")
+    sess = None
     t0 = time.perf_counter()
-    st = {"spent": 0.0, "turns": 0, "prev": None}
     stops, finishes = {}, {}
     try:
         if start_project:
@@ -210,97 +193,14 @@ def run_artist(project, asset_id, reference, height=64, client=None, model=None,
                      ("layer", {"action": "move", "layer": "reference", "index": 0}),
                      ("layer", {"action": "select", "layer": "Layer 1"})]
             if palette:
-                from .regions import KEY_CHARS
-                cols = list(palette.values()) if isinstance(palette, dict) else list(palette)
-                uniq = list(dict.fromkeys(c.lower() for c in cols))[:len(KEY_CHARS)]
-                setup.append(("palette", {"clear": True, "set": {KEY_CHARS[i]: c for i, c in enumerate(uniq)}}))
+                setup.append(("palette", palette_args(palette)))
             for name, args in setup:
                 txt, _, err = mcp.call(name, args)
                 if err:
                     raise RuntimeError(f"setup {name} failed: {txt}")
-        tools = [{"type": "function", "name": t["name"], "description": t["description"][:1024],
-                  "parameters": _schema(t), "strict": False} for t in mcp.tools() if t["name"] in ALLOWED_TOOLS]
-        tools.append({"type": "function", "name": "finish", "strict": False,
-                      "description": "Call when the current task is finished. Give a short summary of what you drew.",
-                      "parameters": {"type": "object", "properties": {"summary": {"type": "string"}}}})
-
-        def save_imgs(imgs, tag):
-            paths = []
-            for k, png in enumerate(imgs):
-                p = os.path.join(out, f"t{st['turns']:03d}_{tag}{k}.png")
-                with open(p, "wb") as f:
-                    f.write(png)
-                paths.append(p)
-            return paths
-
-        def converse(phase, instructions, items, limit):
-            """Run the tool loop until finish / plain answer / limits. Returns (stop reason, finish summary)."""
-            n = 0
-            finished = None
-            while n < limit:
-                n += 1
-                st["turns"] += 1
-                kwargs = dict(model=model, instructions=instructions, input=items, tools=tools,
-                              reasoning={"effort": effort}, parallel_tool_calls=True)
-                if st["prev"]:
-                    kwargs["previous_response_id"] = st["prev"]
-                t = time.perf_counter()
-                resp = client.responses.create(**kwargs)
-                st["prev"] = resp.id
-                usage = getattr(resp, "usage", None)
-                usd = _price(cfg, model, usage)
-                st["spent"] += usd
-                cached = getattr(getattr(usage, "input_tokens_details", None), "cached_tokens", None) if usage else None
-                project.log_cost({"asset": asset_id, "kind": "llm", "role": "artist", "phase": phase, "model": model,
-                                  "usd": round(usd, 5), "input_tokens": getattr(usage, "input_tokens", None),
-                                  "cached_tokens": cached, "output_tokens": getattr(usage, "output_tokens", None),
-                                  "ms": int((time.perf_counter() - t) * 1000)})
-                calls = [o for o in resp.output if getattr(o, "type", None) == "function_call"]
-                said = " ".join(getattr(c, "text", "") for o in resp.output if getattr(o, "type", None) == "message"
-                                for c in getattr(o, "content", []) or [])
-                if not calls:
-                    transcript.write(json.dumps({"phase": phase, "turn": st["turns"], "message": said[:2000]},
-                                                ensure_ascii=False) + "\n")
-                    return "model answered without tool calls", said[:500]
-                items, images = [], []
-                for c in calls:
-                    try:
-                        args = json.loads(c.arguments or "{}")
-                    except json.JSONDecodeError as e:
-                        args, txt, imgs, err = {}, f"error: arguments are not valid JSON ({e})", [], True
-                    else:
-                        if c.name == "finish":
-                            finished = args.get("summary", "")
-                            txt, imgs, err = "ok", [], False
-                        elif c.name not in ALLOWED_TOOLS:
-                            txt, imgs, err = f"error: tool '{c.name}' is not available", [], True
-                        elif c.name == "layer" and ("reference" in args or args.get("action") == "merge_down"):
-                            # the tracing layer must stay a reference: turning it (or merging into it) into real
-                            # pixels would export the converted trace instead of the model's own drawing
-                            txt, imgs, err = ("error: changing the reference flag and merge_down are disabled here; "
-                                              "draw on your own layers"), [], True
-                        else:
-                            txt, imgs, err = mcp.call(c.name, args)
-                    images += save_imgs(imgs, c.name)
-                    items.append({"type": "function_call_output", "call_id": c.call_id,
-                                  "output": txt[:6000] + (f"\n({len(imgs)} image(s) attached below)" if imgs else "")})
-                    transcript.write(json.dumps({"phase": phase, "turn": st["turns"], "tool": c.name,
-                                                 "args": json.dumps(args)[:1500], "error": err, "result": txt[:600],
-                                                 "images": len(imgs), "usd": round(usd, 5)}, ensure_ascii=False) + "\n")
-                transcript.flush()
-                if images:
-                    items.append({"role": "user", "content": [{"type": "input_text", "text": "Images from your tool calls:"}] +
-                                  [{"type": "input_image", "image_url": image_data_url(p, 1024), "detail": "high"}
-                                   for p in images]})
-                log(f"[artist {asset_id} {phase}] turn {st['turns']}: {', '.join(c.name for c in calls)}  (${st['spent']:.3f})")
-                if finished is not None:
-                    # the model expects outputs for its last calls: keep them for the next phase's first request
-                    st["pending"] = items
-                    return "finished", finished
-                if st["spent"] >= max_usd:
-                    return f"budget ${max_usd:.2f} reached", None
-            st["pending"] = items
-            return f"turn limit {limit} reached", None
+        sess = AgentSession(project, asset_id, mcp, client, model, out, effort=effort, allowed=ALLOWED_TOOLS,
+                            max_usd=max_usd, log=log)
+        img = sess.image_item
 
         pal_txt, _, _ = mcp.call("palette", {})
         if "draw" in phases:
@@ -314,13 +214,10 @@ def run_artist(project, asset_id, reference, height=64, client=None, model=None,
             _, view_imgs, _ = mcp.call("view", {"mode": "image"})
             first = [{"type": "input_text", "text": f"Concept art for '{asset_id}' (full resolution), then the current "
                                                     f"canvas with the tracing layer. Canvas {pal_txt}. Draw the sprite."},
-                     {"type": "input_image", "image_url": image_data_url(ref_path, 1024), "detail": "high"}]
-            first += [{"type": "input_image", "image_url": image_data_url(p, 1024), "detail": "high"}
-                      for p in save_imgs(view_imgs, "view")]
-            stops["draw"], finishes["draw"] = converse("draw", instructions, [{"role": "user", "content": first}],
-                                                       max_turns)
+                     img(ref_path)] + [img(p) for p in sess.save_imgs(view_imgs, "view")]
+            stops["draw"], finishes["draw"] = sess.converse("draw", instructions, first, max_turns)
 
-        if "face" in phases and face and st["spent"] < max_usd:
+        if "face" in phases and face and sess.spent < max_usd:
             fx, fy, fw, fh = face
             pad = 3
             vx, vy = max(0, fx - pad), max(0, fy - pad)
@@ -331,13 +228,11 @@ def run_artist(project, asset_id, reference, height=64, client=None, model=None,
             content = [{"type": "input_text", "text": f"FACE PASS. Face region x={fx}, y={fy}, w={fw}, h={fh}. Images: "
                                                       "1) your sprite zoomed on the face area (with grid), 2) the trace "
                                                       "there, 3) the concept's face close-up. Canvas " + pal_txt}]
-            content += [{"type": "input_image", "image_url": image_data_url(p, 1024), "detail": "high"}
-                        for p in save_imgs(cur_imgs + trace_imgs, "faceview")]
+            content += [img(p) for p in sess.save_imgs(cur_imgs + trace_imgs, "faceview")]
             if concept_face and os.path.exists(concept_face):
-                content.append({"type": "input_image", "image_url": image_data_url(concept_face, 1024), "detail": "high"})
-            items = list(st.pop("pending", [])) + [{"role": "user", "content": content}]
+                content.append(img(concept_face))
             instructions = FACE_INSTRUCTIONS.format(height=height, fx=fx, fy=fy, fw=fw, fh=fh, w=W, h=H, turns=face_turns)
-            stops["face"], finishes["face"] = converse("face", instructions, items, face_turns)
+            stops["face"], finishes["face"] = sess.converse("face", instructions, content, face_turns)
 
         png_path = os.path.join(out, f"{asset_id}.png")
         mcp.call("export", {"path": png_path})
@@ -347,7 +242,7 @@ def run_artist(project, asset_id, reference, height=64, client=None, model=None,
             with open(os.path.join(out, "final_compare.png"), "wb") as f:
                 f.write(cmp_imgs[0])
         lint_txt, _, _ = mcp.call("lint", {})
-        summary = {"asset": asset_id, "model": model, "turns": st["turns"], "usd": round(st["spent"], 4),
+        summary = {"asset": asset_id, "model": model, "turns": sess.turns, "usd": round(sess.spent, 4),
                    "seconds": round(time.perf_counter() - t0, 1), "phases": list(stops),
                    "stop": "; ".join(f"{k}: {v}" for k, v in stops.items()) or "no phase ran",
                    "finish_summary": finishes.get("face") or finishes.get("draw"), "face": list(face) if face else None,
@@ -357,5 +252,14 @@ def run_artist(project, asset_id, reference, height=64, client=None, model=None,
             json.dump(summary, f, indent=2, ensure_ascii=False)
         return summary
     finally:
-        transcript.close()
+        if sess:
+            sess.close()
         mcp.close()
+
+
+def palette_args(palette):
+    """Palette tool arguments: colours ({name: hex} or [hex]) under single-character keys (pixel_map friendly)."""
+    from .regions import KEY_CHARS
+    cols = list(palette.values()) if isinstance(palette, dict) else list(palette)
+    uniq = list(dict.fromkeys(c.lower() for c in cols))[:len(KEY_CHARS)]
+    return {"clear": True, "set": {KEY_CHARS[i]: c for i, c in enumerate(uniq)}}

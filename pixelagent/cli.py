@@ -20,7 +20,7 @@ from .store import Project
 def _project(args):
     mode = "dry_run" if getattr(args, "dry_run", False) else getattr(args, "backend", None)
     p = Project(args.project, {"backend": {"mode": mode}} if mode else None)
-    if args.cmd in ("run", "approve", "reject"):
+    if args.cmd in ("run", "approve", "reject", "animate"):
         print(f"backend: {p.config['backend']['mode']}" + (" (stub models, no API calls)" if p.config["backend"]["mode"] == "dry_run" else ""))
     return p
 
@@ -70,9 +70,9 @@ def cmd_reject(args):
     p = _project(args)
     pipe = Pipeline(p, args.id)
     s = pipe.decide(False, None, args.note)
-    print(f"gate {s.gate} rejected; step '{s.name}' will run again with your note")
+    print(f"gate {s.gate} rejected; step '{s.redo_from or s.name}' will run again with your note")
     if s.name == "review":
-        print("note: automatic repair from review notes is milestone M2; rerun a step with `run --from STEP`")
+        print("note: character review notes are recorded; rerun a step with `run --from STEP` to act on them")
         return
     if not args.stop:
         pipe.run()
@@ -93,6 +93,18 @@ def cmd_export(args):
         subprocess.Popen([exe, png], cwd=os.path.dirname(exe), creationflags=flags, close_fds=True,
                          stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         print(f"opened in PixelLiner: {png}")
+
+
+def cmd_animate(args):
+    p = _project(args)
+    p.asset(args.character)  # must exist
+    aid = f"{args.character}-{args.anim}"
+    inputs = {"kind": "animation", "character": args.character, "anim": args.anim, "prompt": args.prompt,
+              "frames": args.frames}
+    if aid not in p.asset_ids():
+        p.new_asset(aid, inputs)
+        print(f"created animation asset '{aid}'")
+    Pipeline(p, aid).run(auto_approve=args.auto_approve)
 
 
 def cmd_artist(args):
@@ -148,6 +160,16 @@ def main(argv=None):
         s.add_argument("--dry-run", action="store_true")
         s.add_argument("--backend", choices=["dry_run", "openai"])
         s.set_defaults(fn=fn)
+
+    s = sub.add_parser("animate", help="animate an approved character from your animation prompt")
+    s.add_argument("character", help="id of a finished character asset")
+    s.add_argument("anim", help="short name for this animation, e.g. walk, attack")
+    s.add_argument("--prompt", required=True, help='what should happen, e.g. "6-frame walk cycle, in place"')
+    s.add_argument("--frames", type=int, help="exact frame count (otherwise the plan decides)")
+    s.add_argument("--dry-run", action="store_true")
+    s.add_argument("--backend", choices=["dry_run", "openai"])
+    s.add_argument("--auto-approve", action="store_true")
+    s.set_defaults(fn=cmd_animate)
 
     s = sub.add_parser("artist", help="the model draws the sprite itself via the pixelliner MCP tools")
     s.add_argument("id")

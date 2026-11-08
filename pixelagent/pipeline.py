@@ -19,6 +19,7 @@ class Step:
     gate: Optional[str] = None            # gate id shown to the user, e.g. "A"
     gate_title: str = ""
     after_gate: Optional[Callable] = None  # applies the user's decision (e.g. the picked candidate)
+    redo_from: Optional[str] = None        # on reject: rerun from this (earlier) step, with the user's note
 
 
 class Ctx:
@@ -80,9 +81,9 @@ class Ctx:
         return self.projectio.load_project(self.input(step, key))
 
 
-def build_steps():
+def build_steps(kind="character"):
     from . import steps
-    return steps.STEPS
+    return steps.ANIM_STEPS if kind == "animation" else steps.STEPS
 
 
 class Pipeline:
@@ -90,7 +91,7 @@ class Pipeline:
         self.project = project
         self.asset = project.asset(asset_id)
         self.backend = make_backend(project, asset_id, mode, client)
-        self.steps = build_steps()
+        self.steps = build_steps(self.asset.state.inputs.get("kind", "character"))
 
     def step(self, name):
         for s in self.steps:
@@ -124,6 +125,11 @@ class Pipeline:
         if not approved:
             notes = self.asset.state.inputs.setdefault("notes", {})
             notes.setdefault(s.name, []).append(note)
+            if s.redo_from:
+                notes.setdefault(s.redo_from, []).append(note)
+                self.asset.save()
+                self.reset_from(s.redo_from)
+                return s
             rec = self.asset.record(s.name)
             rec.status = "pending"
             self.asset.state.gates.pop(s.gate, None)

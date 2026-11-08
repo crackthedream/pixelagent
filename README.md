@@ -93,6 +93,27 @@ head proportions in the concept prompt if a smaller sprite is required. Model ju
 order showed position bias), so faces should be judged by eye. Tools: `benchmarks/artist_run.py`
 (`--hybrid`, `--agent-tag`), `benchmarks/face_pass.py`, `pixelagent/judge.py`.
 
+## Animation (M3): driven by your prompt
+```
+python -m pixelagent --project P animate CHARACTER walk --prompt "6-frame walk cycle in place, the backpack bobs" --frames 6 --backend openai
+python -m pixelagent --project P approve CHARACTER-walk     # gate P: pose sheet  (or: reject ... --note "longer strides")
+python -m pixelagent --project P approve CHARACTER-walk     # gate R: animation   (reject --note redraws the frames)
+```
+An animation is its own asset, linked to a finished character. Steps:
+1. `anim_plan`: the director turns the prompt into frames, poses, timing, loop/in-place and what must stay identical.
+2. `anim_poses`: the image model draws all frames in ONE pose sheet (consistency), from the concept and the approved
+   sprite; the sheet is cut into figures. **Gate P.**
+3. `anim_traces`: figures converted at ONE shared scale (a crouch stays lower), on a common ground line, mapped to the
+   character's palette with its outline.
+4. `anim_draw`: the artist agent draws frame by frame through MCP, one fresh conversation per frame; each frame
+   starts from the previous frame's drawing (frame 1 from the approved sprite), with its trace underneath, onion skin
+   and the approved sprite as model sheet. It changes only what moves. Frame-consistency lint afterwards.
+5. `anim_review`: **gate R**; rejecting with a note redraws the frames with that note (the pose sheet is kept).
+6. `anim_export`: GIF, sprite sheet (one row), per-frame PNGs, layered project, meta.json (durations, poses, loop, pivot).
+
+First real run (Mushroom Traveler, 96 px, 6-frame walk): plan + pose sheet $0.07, drawing $1.46 (upper bound,
+69 rounds); identical 25-colour palette in all frames, opaque-area spread 3.3 %.
+
 ## Files
 ```
 config.toml            engine path, backend mode, model per role, budgets, style guide

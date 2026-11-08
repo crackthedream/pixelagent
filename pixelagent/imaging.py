@@ -11,6 +11,8 @@ def load_rgba(path):
 
 
 def has_transparency(im):
+    if im.mode != "RGBA":
+        return False
     a = np.asarray(im)[..., 3]
     return a.min() < 250
 
@@ -59,15 +61,16 @@ def _to_srgb(a):
     return np.where(a <= 0.0031308, a * 12.92, 1.055 * a ** (1 / 2.4) - 0.055)
 
 
-def pixelize(im, height_px, offset=(0.0, 0.0), margin=2, alpha_threshold=128, return_geom=False):
+def pixelize(im, height_px, offset=(0.0, 0.0), margin=2, alpha_threshold=128, return_geom=False, scale=None):
     """Downscale the content of `im` so it is `height_px` tall, using a linear-light, alpha-weighted box
     filter. `offset` shifts the target pixel grid by a fraction of one target pixel (grid-alignment search).
-    Returns an RGBA PIL image (binary alpha, unquantized colours) with `margin` transparent pixels around;
-    with return_geom also the grid geometry (see block_labels) to map other images onto the same pixels."""
+    scale: source pixels per target pixel, overriding height_px (animation frames share one scale so a crouch
+    stays shorter than a stand). Returns an RGBA PIL image (binary alpha, unquantized colours) with `margin`
+    transparent pixels around; with return_geom also the grid geometry (see block_labels)."""
     x0, y0, x1, y1 = content_bbox(im, alpha_threshold=8)
-    s = (y1 - y0) / float(height_px)
+    s = float(scale) if scale else (y1 - y0) / float(height_px)
     out_w = int(np.ceil((x1 - x0) / s)) + 1
-    out_h = int(height_px) + 1
+    out_h = int(np.ceil((y1 - y0) / s)) + 1
     pad = int(np.ceil(2 * s)) + 2  # the sampling box may extend past the image: pad with transparency
     bx0, by0 = x0 - offset[0] * s + pad, y0 - offset[1] * s + pad
     box = (bx0, by0, bx0 + out_w * s, by0 + out_h * s)
@@ -183,3 +186,44 @@ def to_bytes(im):
 
 def from_bytes(w, h, data):
     return Image.frombytes("RGBA", (w, h), bytes(data))
+
+
+def split_sheet(im, n, alpha_threshold=128, min_gap=3):
+    """Cut a horizontal pose sheet (figures in one row on a plain background) into n figures.
+    Uses empty columns between figures; merges the closest neighbours if there are too many pieces (detached
+    props), splits the widest if there are too few; falls back to n equal columns.
+    Returns [(figure RGBA image cropped to content, (x0, y0, x1, y1) in sheet coordinates)], left to right."""
+    rgba = remove_background(im.convert("RGBA"))
+    a = np.asarray(rgba)[..., 3] >= alpha_threshold
+    cols = a.any(axis=0)
+    spans, x = [], 0
+    W = a.shape[1]
+    while x < W:
+        if cols[x]:
+            s = x
+            while x < W and (cols[x] or (x + min_gap < W and cols[x:x + min_gap].any())):
+                x += 1
+            spans.append([s, x])
+        x += 1
+    spans = [s for s in spans if s[1] - s[0] >= 4]
+    while len(spans) > n:  # merge the pair separated by the smallest gap
+        gaps = [spans[i + 1][0] - spans[i][1] for i in range(len(spans) - 1)]
+        i = int(np.argmin(gaps))
+        spans[i] = [spans[i][0], spans[i + 1][1]]
+        del spans[i + 1]
+    while 0 < len(spans) < n:  # split the widest span in half
+        i = max(range(len(spans)), key=lambda k: spans[k][1] - spans[k][0])
+        s0, s1 = spans[i]
+        mid = (s0 + s1) // 2
+        spans[i:i + 1] = [[s0, mid], [mid, s1]]
+    if not spans:
+        spans = [[k * W // n, (k + 1) * W // n] for k in range(n)]
+    out = []
+    for s0, s1 in spans:
+        col = rgba.crop((s0, 0, s1, rgba.height))
+        try:
+            bx = content_bbox(col, alpha_threshold)
+        except ValueError:
+            raise ValueError("a pose-sheet column has no figure; regenerate the sheet")
+        out.append((col.crop(bx), (s0 + bx[0], bx[1], s0 + bx[2], bx[3])))
+    return out
