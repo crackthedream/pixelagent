@@ -84,10 +84,12 @@ engine over stdio), not converted:
 `[finish] mode = "repair"` restores the older region-rewrite + repair path. Standalone use:
 `python -m pixelagent --project P artist ID --ref concept.png --height 64` (pure agent, tracing the reference).
 
-Measured on the 5 benchmark characters (64 px): hybrid = $0.35-0.44 and 2-3 min per sprite for the drawing (upper
-bound; ~90% of input is cached context), fewest specks of all variants, best knight and mushroom; face pass
-$0.05-0.08, modest gains. At 64 px a face is ~8x10 px: for more expressive faces use taller sprites (e.g. 96 px)
-or game-style head proportions. Model judges are unreliable for faces this small (pairwise judging with swapped
+Measured on the 5 benchmark characters: at 64 px the hybrid costs $0.35-0.44 and 2-3 min per sprite for the drawing
+(upper bound; ~90% of input is cached context), fewest specks of all variants; the face pass ($0.05-0.08) gave modest
+gains because a 64-px face is only ~8x10 px. **Default is therefore 96 px** ([style] sprite_height): faces are
+13-17 px wide and read clearly (eyes, mouths, goggles), the drawing costs $0.80-0.95 and 4-5 min (upper bound), a
+full character from a prompt ~$1.10. Use `--height` (CLI `new`, benchmark runners) for other sizes, or game-style
+head proportions in the concept prompt if a smaller sprite is required. Model judges are unreliable for faces this small (pairwise judging with swapped
 order showed position bias), so faces should be judged by eye. Tools: `benchmarks/artist_run.py`
 (`--hybrid`, `--agent-tag`), `benchmarks/face_pass.py`, `pixelagent/judge.py`.
 

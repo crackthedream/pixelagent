@@ -201,6 +201,14 @@ class PipelineTests(Base):
         self.assertEqual(a.state.steps["rebuild"].version, 1)
         self.assertTrue(os.path.isdir(os.path.join(a.dir, "steps", "07_lines", "v001")))
 
+    def test_default_height_follows_style_and_explicit_wins(self):
+        self.proj.new_asset("d1", {"prompt": "a hero"})
+        self.proj.new_asset("d2", {"prompt": "a hero", "height": 48})
+        for aid, want in (("d1", 96), ("d2", 48)):
+            Pipeline(self.proj, aid).run(until="intake", auto_approve=True, log=quiet)
+            spec = json.loads(rd(self.proj.asset(aid).output("intake", "spec")))
+            self.assertEqual(spec["height_px"], want)
+
     def test_budget_cap(self):
         self.proj.new_asset("hero", {"references": [self.ref]})
         self.proj.log_cost({"asset": "hero", "kind": "llm", "role": "x", "model": "x", "usd": 99})

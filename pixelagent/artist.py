@@ -103,8 +103,15 @@ def face_region(labels, w, h, opaque=None):
     """Estimate the face box from per-pixel material labels: skin/face/eye materials in the upper part of the
     figure (not hair). Returns (x, y, w, h) with a 1-px margin, or None."""
     words = ("skin", "face", "eye", "cheek", "mouth", "blush", "tongue", "lip", "nose")
-    pts = [(k % w, k // w) for k, m in enumerate(labels) if m and any(x in m.lower() for x in words)
-           and "hair" not in m.lower()]
+
+    def is_face(m):
+        # the name must START with a face word: 'eyes_and_mouth', 'skin', 'face_shadow' yes; 'shield_face',
+        # 'clock_face' no (there the face word describes an object, and a knight's shield is not his face)
+        n = m.lower().replace("-", "_").replace(" ", "_")
+        return n.split("_")[0].startswith(words) and "hair" not in n
+
+    face_mats = {m for m in set(labels) if m and is_face(m)}
+    pts = [(k % w, k // w) for k, m in enumerate(labels) if m in face_mats]
     allpts = [(k % w, k // w) for k, m in enumerate(labels) if m]
     if not pts or not allpts:
         return None

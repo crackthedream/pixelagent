@@ -17,7 +17,7 @@ class CharacterSpec(BaseModel):
     summary: str = Field("", description="One-paragraph description of the subject")
     must_keep: list[str] = Field(default_factory=list, description="Identity features that must survive pixelization")
     view: Literal["front", "three_quarter", "side", "back"] = "three_quarter"
-    height_px: int = Field(64, ge=8, le=512, description="Sprite height in pixels")
+    height_px: int = Field(96, ge=8, le=512, description="Sprite height in pixels")
     heads_tall: Optional[float] = Field(None, description="Proportions in head-heights, if known")
     light: str = "top-left"
     outline: Literal["selout", "dark", "none"] = "selout"

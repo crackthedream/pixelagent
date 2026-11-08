@@ -115,7 +115,8 @@ outline_color = "#1b1325"
 max_colors = 32
 ramp_steps = 5
 hue_shift = 24
-sprite_height = 64           # default character height in pixels
+sprite_height = 96           # default character height in pixels (96: faces ~13-17 px wide and readable;
+                             # 64 px was measured too small for expressive faces)
 canvas_margin = 2            # transparent pixels kept around the sprite
 alpha_threshold = 128
 

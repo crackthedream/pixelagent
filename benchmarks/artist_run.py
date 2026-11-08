@@ -34,7 +34,7 @@ def main():
     ap.add_argument("--pipeline", help="project with pipeline results to compare against")
     ap.add_argument("--only", required=True)
     ap.add_argument("--jobs", type=int, default=5)
-    ap.add_argument("--height", type=int, default=64)
+    ap.add_argument("--height", type=int, default=96)
     ap.add_argument("--max-usd", type=float, default=3.0)
     ap.add_argument("--max-turns", type=int, default=60)
     ap.add_argument("--tag", default=time.strftime("%H%M%S"))

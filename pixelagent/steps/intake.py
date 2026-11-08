@@ -25,6 +25,8 @@ def run(ctx):
     spec = ctx.backend.llm.structured("director", prompts.INTAKE, text, refs, CharacterSpec, stub)
     if inp.get("height"):  # explicit user values win over the model
         spec.height_px = int(inp["height"])
+    elif spec.asset_type == "character":  # otherwise characters follow the project's style guide
+        spec.height_px = int(style["sprite_height"])
     if inp.get("view"):
         spec.view = inp["view"]
     p = ctx.save_json("spec", "spec.json", spec)

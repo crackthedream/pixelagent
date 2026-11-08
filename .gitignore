@@ -9,3 +9,4 @@ bench_runs_*/
 benchmarks/refs/synthetic_*.png
 artist_runs/
 bench_runs_v4/
+bench_runs_96/

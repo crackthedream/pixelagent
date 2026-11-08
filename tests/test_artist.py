@@ -163,6 +163,21 @@ class ArtistLoopTests(unittest.TestCase):
             labels[y * w + x] = "blush"
         self.assertEqual(face_region(labels, w, h), (7, 11, 14, 7))   # both eyes, mouth and blush, +1 px
 
+    def test_face_region_ignores_object_faces(self):
+        # a helmeted knight: 'shield_face' / 'visor' are not a face, even high up on the figure
+        w, h = 30, 60
+        labels = [None] * (w * h)
+        for y in range(2, 58):
+            for x in range(5, 25):
+                labels[y * w + x] = "plate_armor"
+        for y in range(10, 30):
+            for x in range(2, 9):
+                labels[y * w + x] = "shield_face"
+        for y in range(4, 8):
+            for x in range(12, 18):
+                labels[y * w + x] = "visor_and_joint_gaps"
+        self.assertIsNone(face_region(labels, w, h))
+
     def test_budget_stops_the_loop(self):
         script = [[call("view", {"mode": "image"}, "v")]]
         fake = NS(responses=FakeResponses(script))

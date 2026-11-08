@@ -22,7 +22,7 @@ def _read_json(path):
         return json.load(f)
 
 
-def rerun_case(proj, case, source_root, step):
+def rerun_case(proj, case, source_root, step, height=None):
     """Copy the newest asset of this case from another project and rerun it from `step` (same concept, map
     and grid): isolates the effect of pipeline changes after that step."""
     import glob
@@ -34,6 +34,14 @@ def rerun_case(proj, case, source_root, step):
     dst = os.path.join(proj.root, "assets", aid)
     if not os.path.exists(dst):
         shutil.copytree(srcs[-1], dst)
+    if height:  # change the sprite size in the (already approved) spec; everything from `step` follows it
+        a = proj.asset(aid)
+        spec_path = a.output("intake", "spec")
+        with open(spec_path, encoding="utf-8") as f:
+            spec = json.load(f)
+        spec["height_px"] = int(height)
+        with open(spec_path, "w", encoding="utf-8") as f:
+            json.dump(spec, f, indent=2, ensure_ascii=False)
     t = time.perf_counter()
     pipe = Pipeline(proj, aid)
     pipe.reset_from(step)
@@ -89,6 +97,7 @@ def main():
     ap.add_argument("--jobs", type=int, default=1, help="cases run in parallel (API calls are I/O bound)")
     ap.add_argument("--rerun-from", help="step to rerun from, using copies of assets from --source")
     ap.add_argument("--source", help="project folder holding the assets to copy for --rerun-from")
+    ap.add_argument("--height", type=int, help="with --rerun-from: change the sprite height (rerun from pixelize or earlier)")
     args = ap.parse_args()
     for stream in (sys.stdout, sys.stderr):
         stream.reconfigure(encoding="utf-8", errors="replace")
@@ -100,7 +109,7 @@ def main():
     with open(os.path.join(HERE, "cases.csv"), encoding="utf-8") as f:
         cases = [c for c in csv.DictReader(f) if not only or c["id"] in only]
     if args.rerun_from:
-        job = lambda c: rerun_case(proj, c, args.source, args.rerun_from)  # noqa: E731
+        job = lambda c: rerun_case(proj, c, args.source, args.rerun_from, args.height)  # noqa: E731
     else:
         job = lambda c: run_case(proj, c, stamp)  # noqa: E731
     with ThreadPoolExecutor(max_workers=max(1, args.jobs)) as ex:

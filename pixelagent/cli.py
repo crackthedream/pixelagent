@@ -152,7 +152,7 @@ def main(argv=None):
     s = sub.add_parser("artist", help="the model draws the sprite itself via the pixelliner MCP tools")
     s.add_argument("id")
     s.add_argument("--ref", required=True, help="reference image (concept art)")
-    s.add_argument("--height", type=int, default=64)
+    s.add_argument("--height", type=int, default=96)
     s.add_argument("--max-usd", type=float, default=3.0)
     s.add_argument("--max-turns", type=int, default=60)
     s.add_argument("--effort", default="medium")
