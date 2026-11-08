@@ -1,0 +1,10 @@
+id,input,source,height,notes
+synthetic_0,reference,refs/synthetic_0.png,64,dry-run stand-in
+synthetic_1,reference,refs/synthetic_1.png,64,dry-run stand-in
+synthetic_2,reference,refs/synthetic_2.png,48,dry-run stand-in
+prompt_mage,prompt,"A young mage in a long crimson coat with gold trim, short silver hair, holding a wooden staff, calm expression",64,example prompt case
+forest_archer,prompt,"Forest Archer. A young forest ranger with short green hair, a hooded brown cloak, a wooden bow, and a small quiver. Earthy green and brown colors, light leather boots, calm expression. Full-body pixel art game character, clear silhouette.",64,user set 1
+mech_engineer,prompt,"Mechanical Engineer. A cheerful young engineer wearing oversized orange goggles, a blue work jacket, dark overalls, and a tool belt. Carry a large wrench over one shoulder. Blue and orange palette, full-body pixel art game character, clear silhouette.",64,user set 1
+apprentice_mage,prompt,"Apprentice Mage. A small apprentice mage with a large purple pointed hat, a dark blue robe, and a glowing crystal staff. A tiny star-shaped charm hangs from the hat. Purple and gold palette, full-body pixel art game character, clear silhouette.",64,user set 1
+armored_knight,prompt,"Armored Knight. A sturdy knight wearing silver armor, a red scarf, and a rounded helmet with a short plume. Hold a broad shield and a short sword. Silver and red palette, full-body pixel art game character, clear silhouette.",64,user set 1
+mushroom_traveler,prompt,"Mushroom Traveler. A friendly mushroom creature with a wide red cap with white spots, a cream-colored body, a green backpack, and a wooden walking stick. Warm red and green palette, full-body pixel art game character, clear silhouette.",64,user set 1

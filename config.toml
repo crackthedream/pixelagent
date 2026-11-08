@@ -1,0 +1,120 @@
+# pixelagent default configuration. A project folder may contain its own config.toml that overrides these keys.
+
+[engine]
+# The PixelLiner MCP engine (imported as a library; launched as an MCP server by agent steps from M2).
+path = "~/pixelliner-mcp"
+pixelliner_exe = "C:/Program Files/PixelLiner/PixelLiner.exe"
+
+[backend]
+# "dry_run" = stub models, no API calls. "openai" = real models (key from the OPENAI_API_KEY environment
+# variable only; it is never written to config, logs or review pages).
+mode = "dry_run"
+timeout_s = 240
+max_retries = 4
+max_image_side = 1024        # images sent to models are downscaled to this (saves input tokens)
+
+# Model per role (OpenAI IDs as listed on developers.openai.com/api/docs/models, Nov 2026). Used from M1.
+[models]
+director = "gpt-6.1-sol"
+vision_pick = "gpt-6.1-terra"
+labeler = "gpt-6.1-terra"
+detail = "gpt-6.1-sol"
+repair = "gpt-6.1-sol"
+animator = "gpt-6.1-sol"
+critic = "gpt-6.1-terra"
+final_critic = "gpt-6-astra"
+utility = "gpt-6-luna"
+image_draft = "gpt-image-2.6-flare"
+image_final = "gpt-image-2.6-sunburst"
+
+# Reasoning effort per role (none | minimal | low | medium | high | xhigh | max).
+[reasoning]
+director = "medium"
+detail = "medium"
+vision_pick = "low"
+labeler = "low"
+critic = "medium"
+final_critic = "high"
+utility = "none"
+
+[images]
+draft_size = "1024x1536"     # portrait suits full-body characters
+draft_quality = "medium"
+final_quality = "high"
+background = "opaque"        # concepts are generated on a flat background that the pipeline removes
+matmap_quality = "medium"     # material map (flat key-colour segmentation of the concept)
+input_fidelity = ""          # "high" for edit models that support it (gpt-image-2.6-sunburst does not)
+
+[matmap]
+min_iou = 0.85               # map silhouette must overlap the concept silhouette this well
+max_unknown = 0.15           # max share of concept pixels whose map colour matches no key
+
+[concept]
+refine_after_pick = false    # true: after gate B, polish the picked draft with images.edit on image_final
+clean_reference = false      # true: redraw reference images into a clean pixel-friendly concept (images.edit)
+
+# USD per 1M tokens. Text models: from developers.openai.com/api/docs/models (Nov 2026).
+# Image models: no official prices were listed there; these are third-party figures -- VERIFY on your
+# billing page. costs.jsonl keeps the raw token counts, so costs can be recomputed later.
+[pricing."gpt-6-astra"]
+input = 10.0
+output = 50.0
+[pricing."gpt-6.1-sol"]
+input = 2.0
+output = 10.0
+[pricing."gpt-6.1-terra"]
+input = 1.0
+output = 5.0
+[pricing."gpt-6-luna"]
+input = 0.10
+output = 0.50
+[pricing."gpt-image-2.6-flare"]
+text_input = 5.0
+image_input = 8.0
+output = 30.0
+[pricing."gpt-image-2.6-sunburst"]
+text_input = 5.0
+image_input = 8.0
+output = 30.0
+
+[detail]
+enabled = true
+max_regions = 4              # focal regions refined per sprite (face, hands, held items...)
+max_region_side = 24         # px; larger areas are clamped
+repair_issues_per_round = 3  # critic issues (with a region) fixed per repair round
+repair_candidates = 2        # variants per region in repair rounds (detail pass uses budget.detail_candidates)
+fidelity_tolerance = 0.05    # max increase of the region's (3x3-blurred) OKLab distance to the concept; calibrated:
+                             # accepted detail edits +0.002..0.039, deleting the knight's shield emblem +0.069
+min_gain = 0.25              # a repair round is kept only if quality rises by more than the critic's noise
+fidelity_weight = 15.0       # quality = critic overall + lint/50 - fidelity_weight * concept distance
+
+[budget]
+# Hard caps. Pro $100 tier = $100 API credit per billing month; leave headroom.
+monthly_usd = 90.0
+concept_drafts = 4
+grid_candidates = 6
+critique_rounds = 2          # repair rounds after the first critique
+detail_candidates = 3
+max_usd_per_asset = 3.0
+
+[style]
+# Project style guide: every asset is built to these rules.
+light = "top-left"
+outline = "selout"           # "selout" | "dark" | "none"
+outline_color = "#1b1325"
+max_colors = 32
+ramp_steps = 5
+hue_shift = 24
+sprite_height = 64           # default character height in pixels
+canvas_margin = 2            # transparent pixels kept around the sprite
+alpha_threshold = 128
+
+[pixelize]
+# Grid-alignment search: sub-pixel offsets (fractions of one target pixel) tried per axis.
+offsets = [0.0, 0.33, 0.66]
+material_clusters = 14       # colour clusters labelled into materials
+fidelity_threshold = 0.10    # OKLab distance; beyond it a pixel falls back to the nearest palette colour
+min_cluster = 3              # same-shade clusters smaller than this merge into neighbours (low contrast only)
+
+[review]
+zoom = 6

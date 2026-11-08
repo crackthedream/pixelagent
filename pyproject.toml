@@ -1,0 +1,15 @@
+[project]
+name = "pixelagent"
+version = "0.1.0"
+description = "Reference/prompt to layered pixel-art sprite pipeline built on the PixelLiner MCP engine"
+requires-python = ">=3.11"
+dependencies = ["pillow>=10", "numpy>=1.26", "pydantic>=2.6"]
+
+[project.optional-dependencies]
+openai = ["openai>=2.0", "openai-agents"]
+
+[project.scripts]
+pixelagent = "pixelagent.cli:main"
+
+[tool.setuptools]
+packages = ["pixelagent", "pixelagent.steps"]

@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+*.tmp
+.env
+# benchmark run outputs (images, review pages, cost logs) and their logs
+bench_runs/
+bench_runs_*/
+*.log
+benchmarks/refs/synthetic_*.png
