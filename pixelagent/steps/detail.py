@@ -39,6 +39,10 @@ def _material_boxes(ctx, w, h):
 
 def run(ctx):
     dcfg = ctx.cfg.get("detail", {})
+    if ctx.cfg.get("finish", {}).get("mode", "artist") == "artist":
+        ctx.skipped = True
+        ctx.info["reason"] = "the artist agent finishes the sprite ([finish] mode = 'artist')"
+        return
     if not dcfg.get("enabled", True):
         ctx.skipped = True
         ctx.info["reason"] = "[detail] enabled = false"

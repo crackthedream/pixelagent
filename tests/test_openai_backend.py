@@ -15,7 +15,7 @@ sys.path.insert(0, REPO)
 
 from PIL import Image  # noqa: E402
 
-from pixelagent import openai_backend, synth  # noqa: E402
+from pixelagent import imaging, openai_backend, synth  # noqa: E402
 from pixelagent.models import BudgetExceeded  # noqa: E402
 from pixelagent.pipeline import Pipeline  # noqa: E402
 from pixelagent.schemas import (CharacterSpec, ClusterLabel, Critique, Issue, Material, MaterialLabels,  # noqa: E402
@@ -135,7 +135,8 @@ class OpenAIBackendTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp(prefix="pxa_oa_")
         self.root = os.path.join(self.tmp, "项目 oa")
-        self.proj = Project(self.root, {"backend": {"mode": "openai"}})
+        # these tests exercise the conversion + detail/repair path; the artist finish has its own test below
+        self.proj = Project(self.root, {"backend": {"mode": "openai"}, "finish": {"mode": "repair"}})
         self.client = FakeClient()
         os.environ["OPENAI_API_KEY"] = FAKE_KEY
 
@@ -245,6 +246,34 @@ class OpenAIBackendTests(unittest.TestCase):
         doc = projectio.load_project(a.output("critique", "project"))
         from pixelagent import imaging
         self.assertEqual(bytes(doc.composite()), imaging.to_bytes(imaging.load_rgba(a.output("critique", "final_1x"))))
+
+    def test_artist_finish_mode(self):
+        self.proj.config["finish"] = {"mode": "artist", "max_usd": 1.5, "max_turns": 5, "face_turns": 3, "face_pass": True}
+        script = [[NS(type="function_call", name="draw", call_id="a1", arguments=json.dumps(
+                      {"ops": [{"op": "rect", "x": 6, "y": 6, "w": 12, "h": 30, "color": "#3050a0", "fill": True}]}))],
+                  [NS(type="function_call", name="finish", call_id="a2", arguments='{"summary": "drawn"}')]]
+        calls = []
+
+        def create(**kw):
+            calls.append(kw)
+            out = script[min(len(calls) - 1, len(script) - 1)]
+            return NS(id=f"r{len(calls)}", output=out, usage=NS(input_tokens=500, output_tokens=50,
+                                                                input_tokens_details=NS(cached_tokens=0)))
+        self.client.responses.create = create
+        self.assertEqual(self._run("hero", {"prompt": "hero"}), "complete")
+        a = self.proj.asset("hero")
+        st = a.state.steps
+        self.assertEqual(st["detail"].status, "skipped")
+        self.assertEqual(st["artist"].status, "done")
+        self.assertIn("draw: finished", st["artist"].info["stop"])
+        self.assertEqual(st["critique"].info["rounds"], 0)                    # no automatic repair over the drawing
+        self.assertIn("pre-pixelisation", calls[0]["instructions"])
+        png = imaging.load_rgba(a.output("export", "png"))
+        d = imaging.to_bytes(png)
+        cols = {tuple(d[i:i + 3]) for i in range(0, len(d), 4) if d[i + 3]}
+        self.assertEqual(cols, {(0x30, 0x50, 0xa0)})                          # the agent's drawing was exported
+        costs = [json.loads(l) for l in rd(os.path.join(self.root, "costs.jsonl")).splitlines()]
+        self.assertTrue(any(c["role"] == "artist" for c in costs))
 
     def test_unusable_map_falls_back_to_clusters(self):
         self.client.images.bad_map = True

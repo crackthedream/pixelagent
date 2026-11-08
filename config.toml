@@ -24,6 +24,7 @@ animator = "gpt-6.1-sol"
 critic = "gpt-6.1-terra"
 final_critic = "gpt-6-astra"
 utility = "gpt-6-luna"
+artist = "gpt-6.1-sol"           # draws the sprite itself through the pixelliner MCP tools
 image_draft = "gpt-image-2.6-flare"
 image_final = "gpt-image-2.6-sunburst"
 
@@ -76,6 +77,15 @@ output = 30.0
 text_input = 5.0
 image_input = 8.0
 output = 30.0
+
+[finish]
+mode = "artist"              # "artist": the model redraws the final sprite over the conversion via MCP (+ face pass)
+                             # "repair": older path, constrained region rewrites + critic repair loop
+max_usd = 1.5                # cap for the artist step per asset (upper bound; cached context is cheaper)
+max_turns = 40
+face_turns = 12
+face_pass = true
+effort = "medium"
 
 [detail]
 enabled = true

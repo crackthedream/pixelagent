@@ -8,6 +8,7 @@
   export ID [--open]                                print final files; --open launches PixelLiner with the PNG
 """
 import argparse
+import json
 import os
 import subprocess
 import sys
@@ -94,6 +95,14 @@ def cmd_export(args):
         print(f"opened in PixelLiner: {png}")
 
 
+def cmd_artist(args):
+    from .artist import run_artist
+    p = _project(args)
+    summary = run_artist(p, args.id, args.ref, args.height, max_usd=args.max_usd, max_turns=args.max_turns,
+                         effort=args.effort, model=args.model)
+    print(json.dumps({k: v for k, v in summary.items() if k != "lint"}, indent=2, ensure_ascii=False))
+
+
 def main(argv=None):
     for stream in (sys.stdout, sys.stderr):  # non-ASCII paths on Windows consoles
         try:
@@ -139,6 +148,16 @@ def main(argv=None):
         s.add_argument("--dry-run", action="store_true")
         s.add_argument("--backend", choices=["dry_run", "openai"])
         s.set_defaults(fn=fn)
+
+    s = sub.add_parser("artist", help="the model draws the sprite itself via the pixelliner MCP tools")
+    s.add_argument("id")
+    s.add_argument("--ref", required=True, help="reference image (concept art)")
+    s.add_argument("--height", type=int, default=64)
+    s.add_argument("--max-usd", type=float, default=3.0)
+    s.add_argument("--max-turns", type=int, default=60)
+    s.add_argument("--effort", default="medium")
+    s.add_argument("--model")
+    s.set_defaults(fn=cmd_artist)
 
     s = sub.add_parser("export")
     s.add_argument("id")

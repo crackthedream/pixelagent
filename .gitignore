@@ -7,3 +7,5 @@ bench_runs/
 bench_runs_*/
 *.log
 benchmarks/refs/synthetic_*.png
+artist_runs/
+bench_runs_v4/

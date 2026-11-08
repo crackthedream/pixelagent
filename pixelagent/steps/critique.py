@@ -43,9 +43,13 @@ def _evaluate(ctx, doc, tag, ref=None):
 
 
 def run(ctx):
-    doc = ctx.load_project("polish")
+    art_rec = ctx.asset.state.steps.get("artist")
+    by_artist = bool(art_rec and art_rec.status == "done" and "project" in art_rec.outputs)
+    doc = ctx.load_project("artist" if by_artist else "polish")
     w, h = doc.w, doc.h
-    rounds = int(ctx.cfg["budget"].get("critique_rounds", 2))
+    # the artist agent's drawing is critiqued for information only: automatic region rewrites on top of it
+    # would undo its deliberate pixel work
+    rounds = 0 if by_artist else int(ctx.cfg["budget"].get("critique_rounds", 2))
     per_round = int(ctx.cfg.get("detail", {}).get("repair_issues_per_round", 3))
     max_side = int(ctx.cfg.get("detail", {}).get("max_region_side", 24))
     dcfg = ctx.cfg.get("detail", {})

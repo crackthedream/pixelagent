@@ -139,14 +139,15 @@ class PipelineTests(Base):
         self.assertLessEqual(res["metrics"]["colors"], 32)
         self.assertEqual(res["metrics"]["components"], 1, "sprite should be one connected shape")
         self.assertTrue(os.path.exists(os.path.join(a.dir, "review", "index.html")))
-        self.assertEqual(a.state.steps["detail"].status, "done")
+        self.assertEqual(a.state.steps["detail"].status, "skipped")     # artist finish mode (default)
+        self.assertIn("dry_run", a.state.steps["artist"].info)
         doc = projectio.load_project(a.output("export", "project"))
         names = [l.name for l in doc.layers]
         self.assertIn("lines", names)
         self.assertIn("polish", names)
         calls = [json.loads(l) for l in rd(os.path.join(self.root, "costs.jsonl")).splitlines()]
         self.assertTrue(calls and all(c["model"] == "stub" for c in calls))
-        self.assertEqual({c["role"] for c in calls if c["kind"] == "llm"}, {"director", "vision_pick", "critic", "detail"})
+        self.assertEqual({c["role"] for c in calls if c["kind"] == "llm"}, {"director", "vision_pick", "critic"})
         self.assertEqual(a.state.steps["materials"].info["label_source"], "material map")
 
     def test_manual_gates_prompt_path(self):

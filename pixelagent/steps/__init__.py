@@ -1,6 +1,6 @@
 """The ordered pipeline. Each step module exposes run(ctx) (and optionally after_gate(ctx, decision))."""
 from ..pipeline import Step
-from . import build, concept, critique, detail, export, intake, later, materials, matmap, pixelize
+from . import artist_step, build, concept, critique, detail, export, intake, later, materials, matmap, pixelize
 
 STEPS = [
     Step(1, "intake", intake.run, gate="A", gate_title="confirm or edit the spec"),
@@ -12,8 +12,9 @@ STEPS = [
     Step(7, "lines", build.lines),
     Step(8, "detail", detail.run),
     Step(9, "polish", build.polish),
-    Step(10, "critique", critique.run),
-    Step(11, "review", critique.review, gate="C", gate_title="approve the sprite"),
-    Step(12, "animate", later.animate),
-    Step(13, "export", export.run),
+    Step(10, "artist", artist_step.run),
+    Step(11, "critique", critique.run),
+    Step(12, "review", critique.review, gate="C", gate_title="approve the sprite"),
+    Step(13, "animate", later.animate),
+    Step(14, "export", export.run),
 ]

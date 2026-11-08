@@ -66,6 +66,31 @@ pixelize $1.96 -> $1.09; critic scores equal within its noise except the archer 
 (6.9 -> 7.2). `benchmarks/compare_rebuild.py` and `benchmarks/run.py --rerun-from STEP --source DIR` reproduce
 such comparisons.
 
+## Artist mode: the model draws the sprite (default finish)
+The final sprite is drawn by the model itself through the pixelliner MCP tools (a real MCP client talks to the
+engine over stdio), not converted:
+
+1. The conversion steps (concept -> material map -> pixelize -> materials -> rebuild -> lines -> polish) produce a
+   palette-clean **trace** on the final pixel grid.
+2. Step `artist` gives a vision model (`[models] artist`) the concept (design authority), the trace as a faint
+   tracing layer (never exported, cannot be converted into pixels) and the trace's palette with single-character
+   keys. It redraws the sprite on its own layers with `draw`/`pixel_map`, reads the trace exactly via
+   `view` grid (palette keys), checks with `view`, `compare_reference` and `lint`, and calls `finish`.
+3. **Face pass**: the face is located from the material labels (skin/eyes/mouth/blush marks grouped together; skipped
+   for helmets), and the model gets the sprite and trace zoomed on it plus a high-resolution crop of the concept's
+   face, with size-specific pixel-art face rules.
+4. The critique then only evaluates (no automatic rewrites over the drawing); export takes the drawing.
+
+`[finish] mode = "repair"` restores the older region-rewrite + repair path. Standalone use:
+`python -m pixelagent --project P artist ID --ref concept.png --height 64` (pure agent, tracing the reference).
+
+Measured on the 5 benchmark characters (64 px): hybrid = $0.35-0.44 and 2-3 min per sprite for the drawing (upper
+bound; ~90% of input is cached context), fewest specks of all variants, best knight and mushroom; face pass
+$0.05-0.08, modest gains. At 64 px a face is ~8x10 px: for more expressive faces use taller sprites (e.g. 96 px)
+or game-style head proportions. Model judges are unreliable for faces this small (pairwise judging with swapped
+order showed position bias), so faces should be judged by eye. Tools: `benchmarks/artist_run.py`
+(`--hybrid`, `--agent-tag`), `benchmarks/face_pass.py`, `pixelagent/judge.py`.
+
 ## Files
 ```
 config.toml            engine path, backend mode, model per role, budgets, style guide
