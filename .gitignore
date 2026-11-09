@@ -10,3 +10,8 @@ benchmarks/refs/synthetic_*.png
 artist_runs/
 bench_runs_v4/
 bench_runs_96/
+
+# PyInstaller output (packaging/build.ps1) and the generated icon
+build/
+dist/
+packaging/PixelAgent.ico

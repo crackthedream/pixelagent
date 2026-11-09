@@ -5,7 +5,15 @@ import sys
 import tomllib
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DEFAULT_CONFIG = os.path.join(REPO, "config.toml")
+FROZEN = bool(getattr(sys, "frozen", False))  # running from the PyInstaller-built PixelAgent.exe
+
+
+def resource_path(*parts):
+    """Bundled files: next to the sources normally, inside the unpacked bundle when frozen."""
+    return os.path.join(getattr(sys, "_MEIPASS", REPO), *parts)
+
+
+DEFAULT_CONFIG = resource_path("config.toml")
 
 
 def _merge(base, over):
@@ -37,7 +45,7 @@ _ENGINE_LOADED = None
 def load_engine(cfg):
     """Make the PixelLiner MCP engine importable (canvas, art, png, gif, project)."""
     global _ENGINE_LOADED
-    path = os.path.abspath(os.path.expanduser(cfg["engine"]["path"]))
+    path = resource_path("engine") if FROZEN else os.path.abspath(os.path.expanduser(cfg["engine"]["path"]))
     if not os.path.exists(os.path.join(path, "canvas.py")):
         raise RuntimeError(f"PixelLiner engine not found at {path} (config [engine] path)")
     if path not in sys.path:

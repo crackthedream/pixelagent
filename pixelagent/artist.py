@@ -135,7 +135,7 @@ def face_region(labels, w, h, opaque=None):
 
 def run_artist(project, asset_id, reference, height=64, client=None, model=None, max_usd=3.0, max_turns=60,
                effort="medium", log=print, trace=None, palette=None, out_dir=None, start_project=None,
-               phases=("draw", "face"), face=None, concept_face=None, face_turns=12):
+               phases=("draw", "face"), face=None, concept_face=None, face_turns=12, notes=None):
     """reference: concept image the model sees. trace (hybrid mode): an image already on the sprite grid (e.g. the
     pipeline's cleaned sprite) used 1:1 as the tracing layer instead of a downscaled reference; palette: colours
     ({name: hex} or [hex]) loaded into the canvas palette with single-character keys.
@@ -213,7 +213,9 @@ def run_artist(project, asset_id, reference, height=64, client=None, model=None,
                                                    max_colors=style.get("max_colors", 32), turns=max_turns)
             _, view_imgs, _ = mcp.call("view", {"mode": "image"})
             first = [{"type": "input_text", "text": f"Concept art for '{asset_id}' (full resolution), then the current "
-                                                    f"canvas with the tracing layer. Canvas {pal_txt}. Draw the sprite."},
+                                                    f"canvas with the tracing layer. Canvas {pal_txt}. Draw the sprite."
+                                                    + (" The user reviewed an earlier version and asked: " + "; ".join(notes)
+                                                       if notes else "")},
                      img(ref_path)] + [img(p) for p in sess.save_imgs(view_imgs, "view")]
             stops["draw"], finishes["draw"] = sess.converse("draw", instructions, first, max_turns)
 

@@ -10,6 +10,10 @@ openai = ["openai>=2.0", "openai-agents"]
 
 [project.scripts]
 pixelagent = "pixelagent.cli:main"
+pixelagent-app = "pixelagent.app.server:main"
 
 [tool.setuptools]
-packages = ["pixelagent", "pixelagent.steps"]
+packages = ["pixelagent", "pixelagent.steps", "pixelagent.app"]
+
+[tool.setuptools.package-data]
+"pixelagent.app" = ["static/*"]

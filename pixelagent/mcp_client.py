@@ -17,7 +17,9 @@ class MCPClient:
         full_env = dict(os.environ)
         full_env.update(env or {})
         full_env["PYTHONIOENCODING"] = "utf-8"
-        self.proc = subprocess.Popen([python or sys.executable, "-I", server_path], stdin=subprocess.PIPE,
+        # in the bundled exe there is no python.exe: the exe itself serves MCP when started with --mcp-server
+        cmd = [sys.executable, "--mcp-server"] if getattr(sys, "frozen", False) else [python or sys.executable, "-I", server_path]
+        self.proc = subprocess.Popen(cmd, stdin=subprocess.PIPE,
                                      stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=full_env)
         self._id = 0
         self._lock = threading.Lock()

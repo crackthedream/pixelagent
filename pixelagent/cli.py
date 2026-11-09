@@ -71,9 +71,6 @@ def cmd_reject(args):
     pipe = Pipeline(p, args.id)
     s = pipe.decide(False, None, args.note)
     print(f"gate {s.gate} rejected; step '{s.redo_from or s.name}' will run again with your note")
-    if s.name == "review":
-        print("note: character review notes are recorded; rerun a step with `run --from STEP` to act on them")
-        return
     if not args.stop:
         pipe.run()
 

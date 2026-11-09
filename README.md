@@ -16,6 +16,20 @@ falling back to the process environment. It is never written to config, logs, co
 Spending caps: `[budget] max_usd_per_asset` and `monthly_usd` (set to $90 for the Pro $100 credit).
 Image-model prices in `[pricing]` are unverified third-party figures; `costs.jsonl` keeps raw token counts.
 
+## The app (PixelAgent.exe)
+A local desktop app over the same pipeline: a character library, a page per character with its progress, and
+the approval steps (check the plan, pick a concept, approve or redraw the sprite, plan and approve animations).
+It runs only on your computer (a small server on 127.0.0.1:8765, shown in an Edge app window) and quits by
+itself a few minutes after its window closes, unless something is still being drawn.
+```powershell
+python -m pixelagent.app                                   # from source
+powershell -ExecutionPolicy Bypass -File packaging\build.ps1   # build dist\PixelAgent.exe (needs PyInstaller)
+```
+The exe bundles the PixelLiner engine and serves it to the artist with `PixelAgent.exe --mcp-server`.
+Settings (mode, default height, monthly limit, projects folder, default `Documents\PixelAgent`) live in
+`~/.pixelagent/settings.json`; Settings → Mode → Test run uses the stub models at no cost. Errors from the
+windowed exe go to `~/.pixelagent/app.log`. The API key can be saved from Settings (user environment only).
+
 ## Quick start (dry run)
 ```
 cd ~/pixelagent

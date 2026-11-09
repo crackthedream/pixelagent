@@ -14,7 +14,8 @@ STEPS = [
     Step(9, "polish", build.polish),
     Step(10, "artist", artist_step.run),
     Step(11, "critique", critique.run),
-    Step(12, "review", critique.review, gate="C", gate_title="approve the sprite"),
+    Step(12, "review", critique.review, gate="C", gate_title="approve the sprite (reject with a note to redraw)",
+         redo_from="artist"),
     Step(13, "animate", later.animate),
     Step(14, "export", export.run),
 ]

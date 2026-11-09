@@ -50,7 +50,7 @@ def run(ctx):
                    out_dir=ctx.path("agent"), max_usd=float(fcfg.get("max_usd", 1.5)),
                    max_turns=int(fcfg.get("max_turns", 40)), face_turns=int(fcfg.get("face_turns", 12)),
                    effort=fcfg.get("effort", "medium"), phases=("draw", "face") if face else ("draw",),
-                   face=face, concept_face=cface)
+                   face=face, concept_face=cface, notes=ctx.notes())
     drawn = ctx.projectio.load_project(s["project"])
     ctx.save_project("project", drawn)
     ctx.save_image("preview", "artist.png", imaging.load_rgba(s["png"]))

@@ -15,9 +15,26 @@ import os
 import re
 import shutil
 import threading
+import time
 
 from .config import load_config
 from .schemas import AssetState, StepRecord
+
+
+def _read_text(path):
+    with open(path, encoding="utf-8") as f:
+        return f.read()
+
+
+def _retry_locked(fn, tries=40, wait=0.025):
+    """Run fn, retrying for up to ~1 s while Windows reports the file as in use by someone else."""
+    for i in range(tries):
+        try:
+            return fn()
+        except PermissionError:
+            if i == tries - 1:
+                raise
+            time.sleep(wait)
 
 
 class Project:
@@ -91,14 +108,20 @@ class Asset:
         else:
             if not os.path.exists(self.state_path):
                 raise FileNotFoundError(f"no asset '{asset_id}' in {project.root}")
-            with open(self.state_path, encoding="utf-8") as f:
-                self.state = AssetState.model_validate_json(f.read())
+            self.state = AssetState.model_validate_json(_retry_locked(lambda: _read_text(self.state_path)))
 
     def save(self):
-        tmp = self.state_path + ".tmp"
+        # a temp file per writer thread; the swap is retried because on Windows os.replace fails
+        # (WinError 5/32) while another thread or process (the UI polling, a virus scanner) has state.json open
+        tmp = f"{self.state_path}.{os.getpid()}-{threading.get_ident()}.tmp"
         with open(tmp, "w", encoding="utf-8") as f:
             f.write(self.state.model_dump_json(indent=2))
-        os.replace(tmp, self.state_path)
+        try:
+            _retry_locked(lambda: os.replace(tmp, self.state_path))
+        except OSError:
+            if os.path.exists(tmp):
+                os.remove(tmp)
+            raise
 
     def path(self, rel):
         return os.path.join(self.dir, rel)
