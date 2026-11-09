@@ -52,7 +52,7 @@ VERSIONED = {"character": ("artist", ("preview",)), "animation": ("anim_draw", (
 REDO_USD = {
     "character": {"Plan": 0.02, "Concept": 0.20, "Pixel conversion": 1.10, "Drawing": 0.95, "Quality check": 0.02,
                   "Your approval": 0.0, "Export": 0.0},
-    "animation": {"Plan": 0.01, "Poses": 0.07, "Frame traces": 1.50, "Drawing frames": 1.50, "Your approval": 0.0,
+    "animation": {"Plan": 0.01, "Poses": 0.07, "Frame traces": 2.00, "Drawing frames": 2.00, "Your approval": 0.0,
                   "Export": 0.0},
 }
 
@@ -104,8 +104,9 @@ def overrides(s):
 
 
 # upper-bound estimates (USD, OpenAI mode) shown before starting; from real runs: a 96-px character ~$1.15 with the
-# fresh face pass, 64 px ~$0.70; 128 px extrapolated. Animations: plan + pose sheet ~$0.10, ~$0.25 per drawn frame.
-ESTIMATES = {"character": {"64": 0.70, "96": 1.15, "128": 1.70}, "animation_base": 0.10, "animation_per_frame": 0.25}
+# fresh face pass, 64 px ~$0.70; 128 px extrapolated. Animations: plan + pose sheet ~$0.07, then ~$0.33 per drawn
+# frame (two real 96-px walks: $1.46 for 6 frames, ~$1.95 for 6 frames from the exe on 2026-11-09).
+ESTIMATES = {"character": {"64": 0.70, "96": 1.15, "128": 1.70}, "animation_base": 0.08, "animation_per_frame": 0.33}
 
 
 def spend_check(settings, pid=None, aid=None):

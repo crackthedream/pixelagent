@@ -85,6 +85,9 @@ max_usd = 1.5                # cap for the artist step per asset (upper bound; c
 max_turns = 40
 face_turns = 12
 face_pass = true
+face_trace = false            # true: rebuild the face inside the trace from the concept, keeping eyes/brows/mouth
+face_rules = "v1"             # "v2": face rules that follow the face trace's feature sizes, with colour rules
+                              # (both chosen by blind owner ratings: benchmarks/face_lab.py)
 effort = "medium"
 
 [animation]

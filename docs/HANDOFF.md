@@ -227,6 +227,25 @@ default** (faces 13–17 px wide). At 96 px the drawing costs $0.80–0.95 and t
 full character from a prompt costs about **$1.10**. Model judges are unreliable on faces this small, so judge
 faces by eye.
 
+**Face lab, round 1** (2026-11-09, `benchmarks/face_lab.py`, results in `benchmarks/face_lab_runs/r1/`). Diagnosis
+on six real 96-px sprites: (1) the trace averages eyes, brows and mouth (1-3 px each) into skin, so the face pass
+has no exact-size guide; (2) the face rules still said eyes are "usually 1 px wide" (from the 64-px era) and
+allowed the outline colour for features; (3) the knight's face box had landed on his shield (already fixed by the
+face-word rule). Tested on five characters, all starting from the same sprite with the face reset to the trace,
+one sample each, rated blind by the owner (1st/2nd/3rd; $1.71 for 15 passes, ~$0.11 each):
+
+| Variant | Mean place | Firsts | Won on |
+|---|---|---|---|
+| A: today's face pass (normal trace, rules v1) | **1.60** | 2/5, never last | mage, archer |
+| B: face trace (`pixelagent/face.py`), rules v1 | 2.20 | 1/5 | Lantern Keeper |
+| C: face trace + rules v2 (feature sizes from the face trace, colour rules) | 2.20 | 2/5 | engineer, mushroom |
+
+Decision: **keep A as the default** (`[finish] face_trace = false`, `face_rules = "v1"`; both switches exist).
+Reading: C wins on big, high-contrast faces (a grin, chibi eyes) and loses on subtle anime faces, where the face
+trace is ragged and misleads; with five characters and one sample each this is a hint, not a finding. A next round
+would test C only for faces whose concept has strong features (measurable from the face trace's dark-cell share),
+with two samples per variant to separate the method from run-to-run variance.
+
 **First real run from the app/exe** (2026-11-09, "Lantern Keeper", prompt, 96 px): plan $0.02, 4 concepts
 $0.15, drawing $0.88 (27 rounds), face pass $0.51 (9 rounds), critique $0.01: **$1.60** (upper bound: cached input
 is counted at full price). The face pass was expensive because it continued the drawing conversation, re-sending
@@ -353,7 +372,8 @@ Poses, Frame traces, Drawing frames, Your approval, Export.
   - the Edge app window;
   - second-launch detection.
 - **Verified with real models (2026-11-09):** a character from a prompt through every gate to export from the
-  exe ($1.60, see section 8). A real animation from the exe has not been run (the same code path; about $1.60).
+  exe ($1.60, see section 8), and a 6-frame walk for it through poses and frames to review ($1.93), with the
+  live view following every frame.
 
 ---
 
@@ -379,15 +399,16 @@ materials, and the artist step is skipped in dry-run mode. Visual quality can on
 
 ## 12. Known issues and limits
 
-1. **No real animation from the exe yet** (characters: done). Cost estimates are upper bounds: cached input is
-   priced in full in `agent_session._price`; actual billing is lower.
+1. **Cost estimates are upper bounds:** cached input is priced in full in `agent_session._price`; actual billing
+   is lower. Real runs from the exe on 2026-11-09: a character $1.60 (before the face-pass fix), a 6-frame walk
+   $1.93 (plan + poses $0.07, ~$0.31 per frame, 11 minutes; no frame-consistency issues).
 2. **Versions** are listed for the sprite drawing and the animation frames only (concept versions stay on disk
    but are not shown). Animations drawn before 2026-11-09 have no 1x GIF or per-frame PNGs, so their oldest
    version thumbnail is the 4x GIF and their review shows the frame strip instead of tiles.
 3. **Budget scope:** the app's monthly limit covers every project in its projects folder; command-line runs
    (`python -m pixelagent`) still count their own project only.
 4. **Faces at 96 px** are much better than at 64 px but remain the weakest part. Model judges cannot rate them
-   reliably.
+   reliably; the owner's blind ratings (face lab round 1) kept today's face pass over two alternatives.
 5. **Character-tuned pipeline.** `CharacterSpec.asset_type` accepts `prop`, `tile` and `scene`, but the steps
    (face pass, material labels, pose logic) assume a character. Objects and scenes are not yet supported in
    practice.
@@ -413,8 +434,7 @@ file locks on `state.json`, the user's name being replaced by the planner, cropp
 an animation-listing bug.
 
 ### Next: app
-1. **One real animation from the exe** (about $1.60) to confirm the frame drawing and the live frame view with
-   real models.
+1. ~~One real animation from the exe~~ done 2026-11-09 ($1.93; the live view followed all six frames).
 2. **More animation presets and export targets.**
    - Presets: idle, run, attack, jump, hurt, death, cast, with frame defaults.
    - Exports: sheet metadata for game engines (Aseprite JSON, Godot SpriteFrames, Unity), and multi-row sheets.
@@ -427,24 +447,39 @@ an animation-listing bug.
    - About 10 reference images in `benchmarks/refs`. Evaluate `[concept] clean_reference` on and off,
      comparing distance to the reference, specks, and owner ratings in `benchmarks/ratings.csv`.
    - The prompt path is well measured; the reference path is not.
-6. **Faces.** Build a small human-rated face set (owner ratings) and use it to compare face-pass prompts and
-    variants. Do not rely on model judges.
+6. **Faces.** Round 1 is done (section 8): today's face pass stays the default. Next round, if faces stay the
+    priority: apply the face trace + rules v2 only to concepts with strong facial features, two samples per
+    variant, rated blind with `benchmarks/face_lab.py` (prepare / run / serve / report). Do not rely on model
+    judges.
 7. **Directions and consistency.** Front/side/back (4- or 8-direction) sprites of the same character with an
     identical palette and proportions, reusing the animation approach: one sheet for all views, then shared
     scale and palette.
 
-### Later: objects and scenes (the owner requires them)
-8. **Props/objects** (`asset_type = "prop"`):
-    - Skip the face pass, use object-appropriate material labels, set the size from the spec.
-    - Done when three benchmark props (for example a weapon, a chest, a potion) export cleanly.
-9. **Tiles and tilesets** (`"tile"`):
-    - Seamless edges (a wrap-around lint), autotile variants (corners and edges), and a shared palette with
-      the characters.
-    - Needs new engine checks: tiling preview and edge continuity lint.
-10. **Scenes/backgrounds** (`"scene"`):
-    - Larger canvases, parallax layers, perspective. Likely a different pipeline (layout → layers → artist per
-      layer).
-    - Start with a design doc and a benchmark before code.
+### Later: objects and backgrounds, as their own workflows
+The owner's direction (2026-11-09): **characters are the primary focus.** Objects and backgrounds must be supported
+too, mainly generated from prompts, and their logic differs from characters, so each gets its own workflow instead
+of options on the character pipeline. Each is a separate asset kind (like animations), with its own steps, gates,
+app sheet ("New object", "New background") and benchmark.
+
+| | Character (exists) | Object / prop (planned) | Background / scene (planned) |
+|---|---|---|---|
+| Subject | One figure, identity, face | One isolated item, silhouette at small size | The whole canvas: composition, depth, mood |
+| Size | 64-128 px tall | 16-48 px (icons, items, props) | 320x180, 480x270 or wider; tileable strips |
+| Concept | Image model, flat background, gate B | Same, item centred, 2-4 drafts | Layout plan first (layers: sky, far, mid, near, ground), then one image per layer, wide aspect, seamless horizontally |
+| Conversion | Material map, pixelize, ramps, trace | Same steps, object material names, no face pass | Per layer: palette per scene (atmospheric perspective: far layers lower contrast and cooler), optional dithering |
+| Model drawing | Artist redraws every pixel over the trace, then a face pass | Artist redraws over the trace (small, cheap) | Too large to redraw pixel by pixel: targeted passes on regions (focal points, edges, seams) |
+| Checks | Lint, critic, face, frame consistency | Lint, silhouette readability at 1x | Seam lint (left/right edges match), parallax layer alpha, colour count per layer |
+| Export | PNG, layers, animation | PNG, icon sizes, item sheet | Layered parallax PNGs, tileable strips, a PixelLiner project |
+
+8. **Objects/props:** reuses most character steps; the work is object-aware material labels, the size rules,
+   skipping the face pass and animation, and an "item sheet" export. Done when three benchmark props (for
+   example a weapon, a chest, a potion) export cleanly from a prompt.
+9. **Backgrounds/scenes:** a new pipeline (layout plan → per-layer concepts → per-layer conversion → targeted
+   artist passes → seam and layer checks → layered export). Start with a short design doc and 3 benchmark
+   prompts (forest, town street, cave) before code.
+10. **Tiles and tilesets:** a subset of backgrounds: seamless edges (wrap-around lint), autotile variants (corners
+    and edges), and a palette shared with the characters. Needs a tiling preview and an edge-continuity lint in
+    the engine.
 
 ### Later: distribution
 11. **Signing and installer:**
@@ -469,6 +504,8 @@ an animation-listing bug.
 | Animation | Driven by the user's prompt; separate asset per animation |
 | Optimisation policy | Root causes across all benchmark characters, never per-example tweaks |
 | UI | Local web UI in an app window, Apple-style, packaged as an .exe |
+| Focus | Characters first. Objects and backgrounds later, from prompts, each as its own workflow (2026-11-09) |
+| Faces | Judged by the owner's blind ratings (benchmarks/face_lab.py), not by model judges |
 | Repos | Private: `crackthedream/pixelagent`, `crackthedream/pixelliner-mcp` |
 
 ---

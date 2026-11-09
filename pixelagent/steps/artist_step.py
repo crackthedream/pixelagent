@@ -44,6 +44,13 @@ def run(ctx):
             crop = regions.concept_crop(imaging.load_rgba(concept_path), geom, face, pad=2)
             if crop is not None:
                 cface = ctx.save_image("concept_face", "concept_face.png", crop)
+            if fcfg.get("face_trace", False):
+                # the face inside the trace rebuilt from the concept, keeping eyes, brows and mouth (pixelagent.face)
+                from ..face import face_trace
+                ft, changed = face_trace(imaging.load_rgba(trace), imaging.load_rgba(concept_path), geom,
+                                         lm["labels"], lm["width"], face)
+                trace = ctx.save_image("trace", "trace.png", ft)
+                ctx.info["face_trace_cells"] = changed
     from ..artist import run_artist
     palette = ["#%02x%02x%02x" % v[:3] for v in doc.palette.values() if v[3] > 0]
     s = run_artist(ctx.project, ctx.asset.id, concept_path, spec.height_px, trace=trace, palette=palette,
@@ -52,7 +59,7 @@ def run(ctx):
                    max_turns=int(fcfg.get("max_turns", 40)), face_turns=int(fcfg.get("face_turns", 12)),
                    effort=fcfg.get("effort", "medium"), phases=("draw", "face") if face else ("draw",),
                    face=face, concept_face=cface, notes=ctx.notes(), log=ctx.log,
-                   live=LivePreview(ctx.asset.dir, "artist"))
+                   live=LivePreview(ctx.asset.dir, "artist"), face_rules=fcfg.get("face_rules", "v1"))
     drawn = ctx.projectio.load_project(s["project"])
     ctx.save_project("project", drawn)
     ctx.save_image("preview", "artist.png", imaging.load_rgba(s["png"]))

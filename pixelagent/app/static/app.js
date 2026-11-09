@@ -429,7 +429,7 @@ function decisionPanel(d) {
   if (g.kind === "animation") {
     return `<div class="decision">${head("Approve the animation", "It plays above; every frame is shown below.")}
       ${g.frames && g.frames.length
-        ? `<div class="frame-row">${g.frames.map((f, i) => `<figure><span class="stage">${stageImg(f.url, "Frame " + (i + 1))}</span>
+        ? `<div class="frame-row" style="--n:${Math.min(g.frames.length, 8)}">${g.frames.map((f, i) => `<figure><span class="stage">${stageImg(f.url, "Frame " + (i + 1))}</span>
             <figcaption>Frame ${i + 1}${f.ms ? ` <span class="ms">${f.ms} ms</span>` : ""}</figcaption></figure>`).join("")}</div>`
         : `<img class="wide-img" src="${esc(g.strip)}" alt="All frames">`}
       ${g.issues && g.issues.length ? `<ul class="issues">${g.issues.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>` : ""}

@@ -84,18 +84,42 @@ redraw the face region with a `draw` pixel_map (use '=' to keep pixels). Check w
 (scale 12-16). You have about {turns} rounds. Call `finish` when the face reads clearly and matches the concept."""
 
 
+FACE_INSTRUCTIONS_V2 = """You are a senior pixel artist doing the FACE PASS on a {height}-px-tall game sprite, using the
+pixelliner tools. Only the face matters now: it is the first thing a player reads, so it must carry the
+character's expression from the concept.
+
+The face is in region x={fx}, y={fy}, w={fw}, h={fh} of the {w}x{h} canvas (an estimate; adjust if the face is
+clearly elsewhere). You get: the current sprite zoomed on that region with a pixel grid, the same region of the
+reference layer, and a high-resolution close-up of the concept's face.
+
+Inside the face the reference layer is a FACE TRACE: the concept's face reduced to exactly this size while keeping
+its dark features, so it shows where the eyes, brows and mouth sit and how many pixels each covers at this size.
+Read it with `view` mode 'grid' and layer 'reference'. Follow its feature positions and sizes and draw them
+cleanly (the face trace is a guide and can be ragged); never make a feature smaller than it shows.
+
+Pixel-art face rules:
+- Eyes: as large as the face trace shows (at this size usually 2 px wide and 2-3 px tall). Build each from a dark
+  upper lash line in the darkest NON-outline dark of the palette (dark brown, the hair's dark or a dark iris), the
+  concept's iris colour below it, and one light highlight pixel when the eye is 2x2 or larger. Never draw eyes in
+  the outline colour, and never as one isolated dark pixel unless the concept's eyes are closed lines.
+- Both eyes clearly separate, the same size and height (unless the view is turned), spaced as in the face trace.
+- Brows: 1-px marks only where the concept shows them clearly, in the hair's dark shade.
+- Mouth: the face trace's size and shape (a smile 2-4 px with the ends up; an open mouth 2x2 with a darker
+  inside), in a warm mid-dark (dark skin shade or dark red), not the outline colour. A calm face: 1-2 px or none.
+- Nose: omitted, or 1 px of skin shadow. Blush: 1-2 px each side if the concept has it.
+- Skin uses 2-3 shades; no stray dark pixels on the skin; keep the hair/fringe edge crisp around the face.
+Redraw the face region with a `draw` pixel_map (use '=' to keep pixels) on your layer. Check with `view` zoomed on
+the region (scale 12-16) and compare with the concept close-up. You have about {turns} rounds. Call `finish` when
+the face reads clearly at 1x and matches the concept's expression."""
+
+FACE_RULES = {"v1": FACE_INSTRUCTIONS, "v2": FACE_INSTRUCTIONS_V2}
+
+
 def face_region(labels, w, h, opaque=None):
     """Estimate the face box from per-pixel material labels: skin/face/eye materials in the upper part of the
     figure (not hair). Returns (x, y, w, h) with a 1-px margin, or None."""
-    words = ("skin", "face", "eye", "cheek", "mouth", "blush", "tongue", "lip", "nose")
-
-    def is_face(m):
-        # the name must START with a face word: 'eyes_and_mouth', 'skin', 'face_shadow' yes; 'shield_face',
-        # 'clock_face' no (there the face word describes an object, and a knight's shield is not his face)
-        n = m.lower().replace("-", "_").replace(" ", "_")
-        return n.split("_")[0].startswith(words) and "hair" not in n
-
-    face_mats = {m for m in set(labels) if m and is_face(m)}
+    from .face import is_face_material  # the name must START with a face word ('shield_face' is not a face)
+    face_mats = {m for m in set(labels) if m and is_face_material(m)}
     pts = [(k % w, k // w) for k, m in enumerate(labels) if m in face_mats]
     allpts = [(k % w, k // w) for k, m in enumerate(labels) if m]
     if not pts or not allpts:
@@ -136,7 +160,7 @@ def face_region(labels, w, h, opaque=None):
 def run_artist(project, asset_id, reference, height=64, client=None, model=None, max_usd=3.0, max_turns=60,
                effort="medium", log=print, trace=None, palette=None, out_dir=None, start_project=None,
                phases=("draw", "face"), face=None, concept_face=None, face_turns=12, notes=None,
-               live=None):
+               live=None, face_rules="v1"):
     """reference: concept image the model sees. trace (hybrid mode): an image already on the sprite grid (e.g. the
     pipeline's cleaned sprite) used 1:1 as the tracing layer instead of a downscaled reference; palette: colours
     ({name: hex} or [hex]) loaded into the canvas palette with single-character keys.
@@ -236,7 +260,8 @@ def run_artist(project, asset_id, reference, height=64, client=None, model=None,
             content += [img(p) for p in sess.save_imgs(cur_imgs + trace_imgs, "faceview")]
             if concept_face and os.path.exists(concept_face):
                 content.append(img(concept_face))
-            instructions = FACE_INSTRUCTIONS.format(height=height, fx=fx, fy=fy, fw=fw, fh=fh, w=W, h=H, turns=face_turns)
+            instructions = FACE_RULES[face_rules].format(height=height, fx=fx, fy=fy, fw=fw, fh=fh, w=W, h=H,
+                                                         turns=face_turns)
             # fresh conversation, as in the face-pass benchmark: its instructions and images stand alone, while carrying
             # the whole drawing conversation along re-sent ~30 rounds of images per call ($0.51 vs ~$0.05-0.08)
             stops["face"], finishes["face"] = sess.converse("face", instructions, content, face_turns, fresh=True)
