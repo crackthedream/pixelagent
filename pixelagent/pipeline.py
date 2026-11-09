@@ -191,7 +191,17 @@ class Pipeline:
                 return s
         return None
 
-    def decide(self, approved, pick=None, note=""):
+    def request_fix(self, note, box=None):
+        """Revise the current drawing with a note (and optionally only inside box) instead of drawing anew."""
+        rec = self.asset.state.steps.get("artist")
+        proj = (rec.outputs or {}).get("project") if rec else None
+        if not proj or not os.path.exists(os.path.join(self.asset.path(proj), "project.json")):
+            return False
+        self.asset.state.inputs["fix"] = {"note": note, "box": list(box) if box else None, "from_project": proj}
+        self.asset.save()
+        return True
+
+    def decide(self, approved, pick=None, note="", box=None):
         s = self.pending_gate()
         if s is None:
             raise ValueError("no gate is waiting for a decision")
@@ -201,6 +211,8 @@ class Pipeline:
             notes.setdefault(s.name, []).append(note)
             if s.redo_from:
                 notes.setdefault(s.redo_from, []).append(note)
+                if s.redo_from == "artist":  # revise the current drawing rather than starting it again
+                    self.request_fix(note, box)
                 self.asset.save()
                 self.reset_from(s.redo_from)
                 return s
@@ -214,10 +226,16 @@ class Pipeline:
         log = log or (lambda msg: print(msg, flush=True))  # flush: progress shows even when output is redirected
         from .review import write_review
         st = self.asset.state
+        from . import cancel
         for s in self.steps:
             rec = self.asset.record(s.name)
             if rec.status in ("done", "skipped"):
                 continue
+            if cancel.requested(self.project.root, self.asset.id):  # the user cancelled: stop before the next step
+                cancel.clear(self.project.root, self.asset.id)
+                st.status = "cancelled"
+                self.asset.save()
+                raise cancel.Cancelled("cancelled")
             if rec.status in ("pending", "failed"):
                 out = self.asset.new_version_dir(s.index, s.name)
                 ctx = Ctx(self.project, self.asset, self.backend, s, out)
@@ -225,6 +243,13 @@ class Pipeline:
                 log(f"[{s.index:02d} {s.name}] running (v{rec.version:03d})")
                 try:
                     s.run(ctx)
+                except cancel.Cancelled:
+                    # not an error: the step runs again on Continue (drawing in progress was checkpointed)
+                    cancel.clear(self.project.root, self.asset.id)
+                    rec.status, rec.error = "pending", ""
+                    st.status = "cancelled"
+                    self.asset.save()
+                    raise
                 except Exception as e:
                     rec.status, rec.error = "failed", f"{type(e).__name__}: {e}"
                     rec.info = {"traceback": traceback.format_exc(limit=6)}

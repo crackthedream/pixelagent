@@ -115,8 +115,12 @@ class AgentSession:
         items = list(self.pending) + [{"role": "user", "content": content}]
         self.pending = []
         n, finished = 0, None
+        from . import cancel
         from .models import budget_problem
         while n < limit:
+            if cancel.requested(self.project.root, self.asset_id):  # the user cancelled: stop before the next call
+                self.pending = items if n else []
+                return "cancelled", None
             problem = budget_problem(self.project, self.asset_id)
             if problem:  # stop cleanly: the drawing so far is kept and exported by the caller
                 self.pending = items if n else []

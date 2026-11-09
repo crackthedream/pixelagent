@@ -114,6 +114,18 @@ the face reads clearly at 1x and matches the concept's expression."""
 
 FACE_RULES = {"v1": FACE_INSTRUCTIONS, "v2": FACE_INSTRUCTIONS_V2}
 
+REVISE_INSTRUCTIONS = """You are a senior pixel artist revising a finished {height}-px-tall game sprite with the pixelliner
+tools. The user reviewed it and asked for this change:
+
+    {note}
+
+{scope}
+The drawing is already on your layers; the reference layer (bottom, never exported) is the original trace. You get:
+the whole sprite, {zoom}and the concept art{concept_close}. Make the requested change well and keep the rest of the
+sprite exactly as it is: same palette, outline and shading style, no other edits. Read exact pixels with `view`
+mode 'grid' on a small region, change them with `draw` (a pixel_map with '=' for kept pixels is safest), and check
+with `view` zoomed in. You have about {turns} rounds. Call `finish` as soon as the request is done."""
+
 
 def face_region(labels, w, h, opaque=None):
     """Estimate the face box from per-pixel material labels: skin/face/eye materials in the upper part of the
@@ -160,7 +172,7 @@ def face_region(labels, w, h, opaque=None):
 def run_artist(project, asset_id, reference, height=64, client=None, model=None, max_usd=3.0, max_turns=60,
                effort="medium", log=print, trace=None, palette=None, out_dir=None, start_project=None,
                phases=("draw", "face"), face=None, concept_face=None, face_turns=12, notes=None,
-               live=None, face_rules="v1"):
+               live=None, face_rules="v1", revise=None, revise_turns=14):
     """reference: concept image the model sees. trace (hybrid mode): an image already on the sprite grid (e.g. the
     pipeline's cleaned sprite) used 1:1 as the tracing layer instead of a downscaled reference; palette: colours
     ({name: hex} or [hex]) loaded into the canvas palette with single-character keys.
@@ -266,6 +278,31 @@ def run_artist(project, asset_id, reference, height=64, client=None, model=None,
             # the whole drawing conversation along re-sent ~30 rounds of images per call ($0.51 vs ~$0.05-0.08)
             stops["face"], finishes["face"] = sess.converse("face", instructions, content, face_turns, fresh=True)
 
+        if "revise" in phases and revise:
+            box = revise.get("box")
+            if box:
+                bx, by, bw, bh = box
+                scope = (f"Change ONLY the area x={bx}..{bx + bw - 1}, y={by}..{by + bh - 1} (w={bw}, h={bh}). Pixels outside "
+                         "it are restored automatically afterwards, so edits there are wasted.")
+                pad = 3
+                vx, vy = max(0, bx - pad), max(0, by - pad)
+                _, zoom_imgs, _ = mcp.call("view", {"mode": "image", "x": vx, "y": vy, "width": min(W - vx, bw + 2 * pad),
+                                                    "height": min(H - vy, bh + 2 * pad), "scale": 12})
+                zoom = "a zoomed view of that area with a pixel grid, "
+            else:
+                scope = "Change only what the request needs."
+                zoom_imgs, zoom = [], ""
+            _, whole, _ = mcp.call("view", {"mode": "image"})
+            content = [{"type": "input_text", "text": f"REVISION. The user asked: {revise['note']}. Canvas {pal_txt}"}]
+            content += [img(p) for p in sess.save_imgs(whole + zoom_imgs, "revise")] + [img(ref_path)]
+            close = revise.get("concept_close")
+            if close and os.path.exists(close):
+                content.append(img(close))
+            instructions = REVISE_INSTRUCTIONS.format(height=height, note=revise["note"], scope=scope, zoom=zoom,
+                                                      concept_close=", with a close-up of the matching part" if close else "",
+                                                      turns=revise_turns)
+            stops["revise"], finishes["revise"] = sess.converse("revise", instructions, content, revise_turns, fresh=True)
+
         png_path = os.path.join(out, f"{asset_id}.png")
         mcp.call("export", {"path": png_path})
         mcp.call("save_project", {"path": os.path.join(out, "project")})
@@ -277,7 +314,8 @@ def run_artist(project, asset_id, reference, height=64, client=None, model=None,
         summary = {"asset": asset_id, "model": model, "turns": sess.turns, "usd": round(sess.spent, 4),
                    "seconds": round(time.perf_counter() - t0, 1), "phases": list(stops),
                    "stop": "; ".join(f"{k}: {v}" for k, v in stops.items()) or "no phase ran",
-                   "finish_summary": finishes.get("face") or finishes.get("draw"), "face": list(face) if face else None,
+                   "finish_summary": finishes.get("revise") or finishes.get("face") or finishes.get("draw"),
+                   "face": list(face) if face else None,
                    "png": png_path, "project": os.path.join(out, "project"), "compare": cmp_txt.splitlines()[:3],
                    "lint": json.loads(lint_txt)}
         with open(os.path.join(out, "summary.json"), "w", encoding="utf-8") as f:

@@ -387,16 +387,16 @@ Poses, Frame traces, Drawing frames, Your approval, Export.
 
 ## 11. Tests
 
-94 `unittest` tests in `tests/`, all free (dry-run mode or scripted fake models):
+99 `unittest` tests in `tests/`, all free (dry-run mode or scripted fake models):
 
 | File | Tests | Covers |
 |---|---|---|
 | `test_pipeline.py` | 11 | Steps, gates, versions, resume; test runs ignore paid limits |
 | `test_quality_mechanisms.py` | 15 | Section 7 mechanisms |
-| `test_openai_backend.py` | 13 | Request shapes, strict schemas, cost math (mocked); a limit stops the artist honestly and it continues later |
+| `test_openai_backend.py` | 16 | Request shapes, strict schemas, cost math (mocked); a limit stops the artist honestly and it continues later; revising an area changes only that area; revising continues the drawing; cancel keeps the drawing and Continue resumes |
 | `test_artist.py` | 9 | Artist agent tools/session; fresh face pass; two views in one round are two images |
 | `test_animation.py` | 6 | Animation steps; a limit stops the frames honestly and resumes; play-once GIFs |
-| `test_app.py` | 19 | App API end-to-end, references, animation review, security, item ids, paused runs, managing items and projects, Recently Deleted, single instance, save retry |
+| `test_app.py` | 21 | App API end-to-end, references, animation review, security, item ids, paused runs, managing items and projects, Recently Deleted, revise and area fixes, a cancel applies only to its own run, single instance, save retry |
 | `test_live.py` | 5 | Live drawing through the real engine (never the trace), staleness, shown only while running |
 | `test_budget.py` | 7 | One monthly limit, the ledger survives deleting projects, seeding, limit per item, refusing before creating, free final export, drawing loop stopping |
 | `test_face.py` | 3 | Face trace keeps small dark features, only face cells change |
@@ -407,6 +407,22 @@ Note: dry-run stubs exercise the plumbing only. The stub labeller groups cluster
 materials, and the artist step is skipped in dry-run mode. Visual quality can only be judged with real models.
 
 ---
+
+## 11a. Steering a character: Cancel and Revise (2026-11-09)
+
+- **Cancel** (`pixelagent/cancel.py`, `POST /api/cancel`): the pipeline checks before each step and the model loop
+  before each round, so a cancel takes effect within one model call. The cancelled step goes back to `pending`, the
+  item shows "Cancelled" with Continue, and drawing in progress is checkpointed (characters and animation frames).
+  A cancel request only applies to the run it was made for (cleared when a run starts and ends).
+- **Revise instead of redraw** (`pixelagent/revise.py`, `Pipeline.request_fix`, `POST /api/fix`): a note on the
+  sprite approval, or on a finished character, revises the current drawing in a short fresh session
+  (`[finish] revise_turns = 12`, `revise_max_usd = 0.30`) instead of drawing it again. With an area (dragged on the
+  sprite in the app, snapped to its pixels) only that rectangle may change: afterwards `confine()` restores every
+  pixel outside it from the version the revision started from, layer by layer. Each revision is a new version
+  (Versions card, restorable). A full redraw is still available as Redo next to Drawing.
+- **First real area fix** (Lantern Keeper's face, 15 x 14 px area): 7 rounds, **$0.10 in 82 s** (a full redraw:
+  ~$0.90, ~5 min); exactly 15 pixels changed, all inside the area; the eyes and smile became readable at 1x.
+- Stop messages: a spending stop reads "Stopped at a spending limit" with a link to Settings.
 
 ## 11b. Review of `de5e3a2` (Codex, 2026-11-09): all 11 findings fixed
 
@@ -466,6 +482,8 @@ an animation-listing bug.
 
 ### Next: app
 1. ~~One real animation from the exe~~ done 2026-11-09 ($1.93; the live view followed all six frames).
+   ~~Cancel; revise instead of redraw; fix an area~~ done 2026-11-09 (section 11a). Next for steering: revising a
+   single animation frame the same way (the frames are already separate PNGs and cels).
 2. **More animation presets and export targets.**
    - Presets: idle, run, attack, jump, hurt, death, cast, with frame defaults.
    - Exports: sheet metadata for game engines (Aseprite JSON, Godot SpriteFrames, Unity), and multi-row sheets.

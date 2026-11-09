@@ -478,3 +478,22 @@ details summary { cursor: default; color: var(--text-2); font-size: 12px; }
 .version.old .stage { opacity: .45; }
 .version-bar .vb-note { font-weight: 400; font-size: 12px; }
 p.small { font-size: 11px; margin: 8px 0 0; }
+
+/* ------------------------------------------------------------- revising and cancelling */
+.decision.quiet .grow { flex: 1; }
+.decision.quiet-card { box-shadow: var(--shadow-1); }
+.revise { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
+.revise-meta { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; font-size: 12px; }
+.revise-meta .hint { margin-left: auto; }
+.area-chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 4px 3px 9px; border-radius: var(--r-pill);
+  background: var(--accent-soft); color: var(--accent); font-weight: 500; font-variant-numeric: tabular-nums; }
+.area-chip .ic { width: 13px; height: 13px; }
+.chip-x { border: 0; background: none; color: inherit; width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center; cursor: default; }
+.chip-x:hover { background: color-mix(in srgb, var(--accent) 18%, transparent); }
+.chip-x .ic { width: 11px; height: 11px; }
+.hero.selecting { cursor: crosshair; }
+.hero.selecting img { pointer-events: auto; }
+.area-box { position: absolute; z-index: 3; pointer-events: none; border: 2px solid var(--accent); border-radius: 2px;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  outline: 1px solid rgba(255, 255, 255, 0.85); outline-offset: 0;
+  box-shadow: 0 0 0 100vmax rgba(0, 0, 0, 0.22); }

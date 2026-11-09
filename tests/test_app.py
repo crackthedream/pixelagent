@@ -333,6 +333,43 @@ class AppServerTest(unittest.TestCase):
         self.assertEqual(mine(), [])
         self.assertEqual(self.ok(self.get("/api/overview"))["trash_count"], 0)
 
+    def test_revise_a_finished_character_and_an_area(self):
+        pid = self.new_project("Revise")
+        aid = self.ok(self.post("/api/characters", {"project": pid, "prompt": "a small knight"}))["id"]
+        self.assertEqual(self.drive(pid, aid)["status"], "complete")
+        d = self.asset(pid, aid)
+        self.assertTrue(d["can_revise"])
+        self.assertEqual(self.post("/api/fix", {"project": pid, "id": aid, "note": " "})[0], 400)
+        self.ok(self.post("/api/fix", {"project": pid, "id": aid, "note": "brighter eyes", "box": [3, 4, 5, 6]}))
+        d = self.wait_idle(pid, aid)
+        self.assertEqual(d["gate"], "review")                         # the revision comes back for approval
+        self.assertEqual(len(d["versions"]["items"]), 2)               # as a new version; the old one is kept
+        a = Project(os.path.join(self.projects, pid)).asset(aid)
+        self.assertNotIn("fix", a.state.inputs)
+        self.assertEqual(a.state.steps["artist"].info["revised"]["box"], [3, 4, 5, 6])
+        # at the approval, a note with an area goes the same way (no full redraw)
+        self.ok(self.post("/api/decide", {"project": pid, "id": aid, "approve": False, "note": "again", "box": [0, 0, 4, 4]}))
+        d = self.wait_idle(pid, aid)
+        self.assertEqual(len(d["versions"]["items"]), 3)
+        # animations cannot be revised this way
+        self.ok(self.post("/api/decide", {"project": pid, "id": aid, "approve": True}))
+        self.wait_idle(pid, aid)
+        anim = self.ok(self.post("/api/animations", {"project": pid, "character": aid, "prompt": "idle", "frames": 2}))["id"]
+        self.wait_idle(pid, anim)
+        self.assertEqual(self.post("/api/fix", {"project": pid, "id": anim, "note": "x"})[0], 400)
+
+    def test_a_cancel_only_applies_to_its_own_run(self):
+        from pixelagent import cancel
+        pid = self.new_project("Cancel")
+        aid = self.ok(self.post("/api/characters", {"project": pid, "prompt": "a robot"}))["id"]
+        self.wait_idle(pid, aid)                                       # waiting at the plan
+        self.assertEqual(self.post("/api/cancel", {"project": pid, "id": aid})[0], 400)   # nothing is running
+        cancel.request(os.path.join(self.projects, pid), aid)          # a stale request from an earlier run
+        self.ok(self.post("/api/decide", {"project": pid, "id": aid, "approve": True}))
+        d = self.wait_idle(pid, aid)
+        self.assertNotEqual(d["status"], "cancelled")                  # the new run was not stopped by it
+        self.assertEqual(d["gate"], "concept")
+
     def test_item_ids_cannot_leave_their_project(self):
         # review finding F03: mutations joined the raw id to the assets folder
         a, b = self.new_project("Home"), self.new_project("Other")

@@ -29,6 +29,9 @@ def run(ctx):
         ctx.save_project("project", doc)
         ctx.save_image("preview", "artist.png", imaging.load_rgba(trace))
         ctx.info["dry_run"] = "artist agent skipped (needs a real model); polished sprite passed through"
+        fix = ctx.asset.state.inputs.pop("fix", None)  # a revision request is used up here too (nothing to revise)
+        if fix:
+            ctx.info["revised"] = {"note": fix.get("note"), "box": fix.get("box"), "test_run": True}
         return
     fcfg = ctx.cfg.get("finish", {})
     spec = ctx.spec()
@@ -57,35 +60,67 @@ def run(ctx):
     # a drawing that a spending limit stopped earlier is continued, not started over (finding F06)
     ckpt_dir = os.path.join(ctx.asset.dir, "checkpoints", "artist")
     made_from = {k: (r.info or {}).get("dir") for k, r in ctx.asset.state.steps.items() if k in ("concept", "polish")}
-    start = None
-    try:
+    phases = ("draw", "face") if face else ("draw",)
+    start, revise, base = None, None, None
+    fix = ctx.asset.state.inputs.get("fix")
+    if fix:
+        # revise the current drawing with the user's note (optionally only inside an area) instead of starting over
+        base = ctx.asset.path(fix.get("from_project", ""))
+        if os.path.exists(os.path.join(base, "project.json")):
+            from ..revise import clamp_box
+            box = clamp_box(fix.get("box"), doc.w, doc.h)
+            close = None
+            if box:
+                with open(ctx.input("pixelize", "geom"), encoding="utf-8") as f:
+                    crop = regions.concept_crop(imaging.load_rgba(concept_path), json.load(f), box, pad=2)
+                if crop is not None:
+                    close = ctx.save_image(None, "fix_concept.png", crop)
+            revise = {"note": fix["note"], "box": box, "concept_close": close}
+            start, phases = base, ("revise",)
+            made_from["fix"] = fix.get("from_project")
+            ctx.log(f"[artist] revising the current drawing{' inside the selected area' if box else ''}: {fix['note']}")
+        else:
+            ctx.log("[artist] the version to revise is gone; drawing anew with the note")
+            base = None
+    try:  # work that a spending limit or a cancel stopped earlier is continued, not started over
         with open(os.path.join(ckpt_dir, "checkpoint.json"), encoding="utf-8") as f:
             if json.load(f).get("made_from") == made_from:
                 start = os.path.join(ckpt_dir, "project")
-                ctx.log("[artist] continuing the drawing that a spending limit stopped")
+                ctx.log("[artist] continuing from where it stopped")
     except (OSError, ValueError):
         pass
     s = run_artist(ctx.project, ctx.asset.id, concept_path, spec.height_px, trace=trace, palette=palette,
                    client=getattr(ctx.backend.llm, "client", None),
-                   out_dir=ctx.path("agent"), max_usd=float(fcfg.get("max_usd", 1.5)),
+                   out_dir=ctx.path("agent"),
+                   max_usd=float(fcfg.get("revise_max_usd", 0.30) if revise else fcfg.get("max_usd", 1.5)),
                    max_turns=int(fcfg.get("max_turns", 40)), face_turns=int(fcfg.get("face_turns", 12)),
-                   effort=fcfg.get("effort", "medium"), phases=("draw", "face") if face else ("draw",),
-                   face=face, concept_face=cface, notes=ctx.notes(), log=ctx.log, start_project=start,
-                   live=LivePreview(ctx.asset.dir, "artist"), face_rules=fcfg.get("face_rules", "v1"))
-    if "stopped:" in s["stop"]:
-        # the monthly or per-item limit stopped the model: keep its drawing for later, and do not pass a
-        # half-drawn sprite on to critique and approval as if it were finished
+                   effort=fcfg.get("effort", "medium"), phases=phases,
+                   face=face, concept_face=cface, notes=None if revise else ctx.notes(), log=ctx.log, start_project=start,
+                   live=LivePreview(ctx.asset.dir, "artist"), face_rules=fcfg.get("face_rules", "v1"),
+                   revise=revise, revise_turns=int(fcfg.get("revise_turns", 12)))
+    if "stopped:" in s["stop"] or "cancelled" in s["stop"]:
+        # a spending limit or the user stopped the model: keep its drawing for later, and never pass a half-done
+        # sprite on to critique and approval as if it were finished
         shutil.rmtree(ckpt_dir, ignore_errors=True)
         shutil.copytree(s["project"], os.path.join(ckpt_dir, "project"))
         with open(os.path.join(ckpt_dir, "checkpoint.json"), "w", encoding="utf-8") as f:
             json.dump({"made_from": made_from, "stop": s["stop"]}, f)
+        if "cancelled" in s["stop"] and "stopped:" not in s["stop"]:
+            from ..cancel import Cancelled
+            raise Cancelled("cancelled; the drawing so far is kept")
         from ..models import BudgetExceeded
         why = s["stop"].split("stopped: ", 1)[1].split(";")[0]
         raise BudgetExceeded(f"the drawing stopped before it was finished: {why}. It is kept; raise the limit in "
                              "Settings and choose Try again to continue it")
     shutil.rmtree(ckpt_dir, ignore_errors=True)
     drawn = ctx.projectio.load_project(s["project"])
+    if revise and revise["box"]:
+        from ..revise import confine
+        ctx.info["restored_outside_area"] = confine(drawn, ctx.projectio.load_project(base), revise["box"])
     ctx.save_project("project", drawn)
-    ctx.save_image("preview", "artist.png", imaging.load_rgba(s["png"]))
+    ctx.save_image("preview", "artist.png", imaging.from_bytes(drawn.w, drawn.h, drawn.composite()))
+    if revise:
+        ctx.info["revised"] = {"note": revise["note"], "box": list(revise["box"]) if revise["box"] else None}
+        ctx.asset.state.inputs.pop("fix", None)
     ctx.info.update(usd=s["usd"], turns=s["turns"], stop=s["stop"], face=s["face"],
                     summary=(s.get("finish_summary") or "")[:300], compare=s["compare"][1] if len(s["compare"]) > 1 else "")

@@ -18,6 +18,8 @@ import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote, urlencode, urlparse
 
+from PIL import Image
+
 from ..config import resource_path
 from ..pipeline import Pipeline
 from ..schemas import CharacterSpec
@@ -112,7 +114,9 @@ def overrides(s):
 # upper-bound estimates (USD, OpenAI mode) shown before starting; from real runs: a 96-px character ~$1.15 with the
 # fresh face pass, 64 px ~$0.70; 128 px extrapolated. Animations: plan + pose sheet ~$0.07, then ~$0.33 per drawn
 # frame (two real 96-px walks: $1.46 for 6 frames, ~$1.95 for 6 frames from the exe on 2026-11-09).
-ESTIMATES = {"character": {"64": 0.70, "96": 1.15, "128": 1.70}, "animation_base": 0.08, "animation_per_frame": 0.33}
+ESTIMATES = {"character": {"64": 0.70, "96": 1.15, "128": 1.70}, "animation_base": 0.08, "animation_per_frame": 0.33,
+             # revising the current drawing (a short session) instead of drawing it again (~$0.90)
+             "revise_area": 0.20, "revise_whole": 0.35}
 
 
 def spend_check(settings, pid=None, aid=None):
@@ -167,8 +171,11 @@ class Jobs:
             self.errors.pop(key, None)
 
             def run():
+                from ..cancel import Cancelled
                 try:
                     fn(lambda m: self._log(key, m))
+                except Cancelled:  # not an error: the item is paused and Continue picks up where it stopped
+                    self._log(key, "cancelled: everything finished so far is kept")
                 except Exception as e:  # shown to the user in the item's progress
                     self.errors[key] = f"{type(e).__name__}: {e}"
                     self._log(key, "error: " + self.errors[key])
@@ -278,6 +285,11 @@ def asset_detail(settings, pid, proj, aid):
     d["steps"] = steps
     d["inputs"] = {k: v for k, v in a.state.inputs.items() if k in ("prompt", "height", "view", "character", "frames", "anim")}
     d["log"] = JOBS.logs.get((pid, aid), [])[-40:]
+    from .. import cancel
+    d["cancelling"] = d["running"] and cancel.requested(proj.root, aid)
+    d["can_revise"] = (d["kind"] == "character" and not d["running"]
+                       and bool((a.state.steps.get("artist") and a.state.steps["artist"].outputs or {}).get("project"))
+                       and (d["status"] == "complete" or d.get("gate") == "review"))
     d["job_error"] = JOBS.errors.get((pid, aid))
     gs = pipe.pending_gate()
     if gs:
@@ -369,9 +381,14 @@ def start_run(settings, pid, aid, check=True, **kw):
         spend_check(settings, pid, aid)
     proj = Project(project_path(settings, pid), overrides(settings))
     proj.asset(aid)  # a valid id of an existing item, checked before anything starts
+    from .. import cancel
+    cancel.clear(proj.root, aid)  # a cancel belongs to the run it was made for, never to a later one
 
     def job(log):
-        Pipeline(proj, aid).run(log=log, **kw)
+        try:
+            Pipeline(proj, aid).run(log=log, **kw)
+        finally:
+            cancel.clear(proj.root, aid)
     JOBS.start((pid, aid), job)
 
 
@@ -452,7 +469,13 @@ def decide(settings, body):
     if not approve and not note:
         raise ValueError("say what should change")
     pick = body.get("pick")
-    pipe.decide(approve, int(pick) if pick is not None else None, note)
+    from ..revise import clamp_box
+    box = None
+    if body.get("box") and g.gate == "C":
+        pr = pipe.asset.state.steps.get("artist")
+        size = image_size(pipe.asset.path(pr.outputs["preview"])) if pr and "preview" in (pr.outputs or {}) else None
+        box = clamp_box(body["box"], *size) if size else None
+    pipe.decide(approve, int(pick) if pick is not None else None, note, box=box)
     start_run(settings, pid, aid, check=paid)
     return {"ok": True}
 
@@ -632,6 +655,49 @@ def trash_restore(settings, body):
     return r
 
 
+def image_size(path):
+    with Image.open(path) as im:  # closed at once: an open file would block moving the item on Windows
+        return im.size
+
+
+def cancel_item(settings, body):
+    pid, aid = body["project"], body["id"]
+    proj = Project(project_path(settings, pid), overrides(settings))
+    proj.asset(aid)
+    if not JOBS.is_running((pid, aid)):
+        raise ValueError("nothing is running for this item")
+    from .. import cancel
+    cancel.request(proj.root, aid)
+    return {"ok": True}
+
+
+def fix_item(settings, body):
+    """Revise a finished character (or one waiting for approval) with a note, optionally only inside an area."""
+    pid, aid = body["project"], body["id"]
+    note = (body.get("note") or "").strip()
+    if not note:
+        raise ValueError("say what should change")
+    spend_check(settings, pid, aid)
+    proj = Project(project_path(settings, pid), overrides(settings))
+    _not_running(pid, [aid])
+    pipe = Pipeline(proj, aid, mode="dry_run")
+    g = pipe.pending_gate()
+    if g is not None and g.gate == "C":
+        return decide(settings, {"project": pid, "id": aid, "approve": False, "note": note, "box": body.get("box")})
+    rec = pipe.asset.state.steps.get("artist")
+    if g is not None or not rec or rec.status != "done":
+        raise ValueError("only a finished sprite can be revised")
+    from ..revise import clamp_box
+    box = clamp_box(body.get("box"), *image_size(pipe.asset.path(rec.outputs["preview"]))) if body.get("box") else None
+    if not pipe.request_fix(note, box):
+        raise ValueError("this sprite has no drawing to revise; use Redo from Drawing instead")
+    pipe.asset.state.inputs.setdefault("notes", {}).setdefault("artist", []).append(note)
+    pipe.asset.save()
+    pipe.reset_from("artist")
+    start_run(settings, pid, aid)
+    return {"ok": True}
+
+
 def open_item(settings, body):
     pid, aid = body["project"], body["id"]
     proj = Project(project_path(settings, pid), overrides(settings))
@@ -786,6 +852,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(restore_version(s, body))
             if u.path == "/api/redo":
                 return self._json(redo_from(s, body))
+            if u.path == "/api/cancel":
+                return self._json(cancel_item(s, body))
+            if u.path == "/api/fix":
+                return self._json(fix_item(s, body))
             if u.path == "/api/trash/restore":
                 return self._json(trash_restore(s, body))
             if u.path == "/api/trash/delete":  # permanent: only from the user's explicit, confirmed action

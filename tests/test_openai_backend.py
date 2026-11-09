@@ -312,6 +312,89 @@ class OpenAIBackendTests(unittest.TestCase):
         self.assertIn((0x30, 0x50, 0xa0), {tuple(d[i:i + 3]) for i in range(0, len(d), 4) if d[i + 3]})
         self.assertFalse(os.path.exists(os.path.join(a.dir, "checkpoints", "artist")))
 
+    def _artist_hero(self, first_script):
+        """A finished character drawn by the (fake) artist: a blue body."""
+        self.proj.config["finish"] = {"mode": "artist", "max_usd": 1.5, "max_turns": 5, "face_turns": 3, "face_pass": False}
+        self.script = first_script
+        self.calls = []
+
+        def create(**kw):
+            self.calls.append(kw)
+            out = self.script.pop(0) if self.script else [NS(type="function_call", name="finish", call_id=f"z{len(self.calls)}",
+                                                             arguments='{"summary": "done"}')]
+            return NS(id=f"r{len(self.calls)}", output=out, usage=NS(input_tokens=500, output_tokens=50,
+                                                                     input_tokens_details=NS(cached_tokens=0)))
+        self.client.responses.create = create
+        self.assertEqual(self._run("hero", {"prompt": "hero"}), "complete")
+        return imaging.to_bytes(imaging.load_rgba(self.proj.asset("hero").output("export", "png")))
+
+    @staticmethod
+    def _draw(ops, cid):
+        return [NS(type="function_call", name="draw", call_id=cid, arguments=json.dumps({"ops": ops}))]
+
+    def test_revising_an_area_changes_only_that_area(self):
+        blue = [{"op": "rect", "x": 6, "y": 6, "w": 12, "h": 30, "color": "#3050a0", "fill": True}]
+        before = self._artist_hero([self._draw(blue, "a1")])
+        a = self.proj.asset("hero")
+        w = imaging.load_rgba(a.output("export", "png")).width
+        n_draw_calls = len(self.calls)
+        # the revision paints red over the WHOLE canvas: only the selected area may keep it
+        self.script = [self._draw([{"op": "rect", "x": 0, "y": 0, "w": 60, "h": 60, "color": "#e02020", "fill": True}], "b1")]
+        pipe = Pipeline(self.proj, "hero", client=self.client)
+        self.assertTrue(pipe.request_fix("make the belt red", (8, 10, 4, 3)))
+        pipe.reset_from("artist")
+        self.assertEqual(Pipeline(self.proj, "hero", client=self.client).run(auto_approve=True, log=quiet), "complete")
+        rev = self.calls[n_draw_calls]
+        self.assertIn("make the belt red", rev["instructions"])
+        self.assertIn("Change ONLY the area x=8..11, y=10..12", rev["instructions"])
+        self.assertNotIn("previous_response_id", rev)                    # a short, fresh session
+        after = imaging.to_bytes(imaging.load_rgba(self.proj.asset("hero").output("export", "png")))
+        changed = {((i // 4) % w, (i // 4) // w) for i in range(0, len(after), 4) if after[i:i + 4] != before[i:i + 4]}
+        self.assertTrue(changed)
+        self.assertTrue(all(8 <= x < 12 and 10 <= y < 13 for x, y in changed), sorted(changed)[:5])
+        a = self.proj.asset("hero")
+        self.assertNotIn("fix", a.state.inputs)                          # the request was used up
+        self.assertEqual(a.state.steps["artist"].version, 2)              # a new version, the old one kept
+        self.assertGreater(a.state.steps["artist"].info["restored_outside_area"], 0)
+
+    def test_revising_without_an_area_continues_the_drawing(self):
+        blue = [{"op": "rect", "x": 6, "y": 6, "w": 12, "h": 30, "color": "#3050a0", "fill": True}]
+        self._artist_hero([self._draw(blue, "a1")])
+        self.script = [self._draw([{"op": "pixel", "x": 7, "y": 7, "color": "#e02020"}], "b1")]
+        pipe = Pipeline(self.proj, "hero", client=self.client)
+        pipe.request_fix("one red pixel on the shoulder")
+        pipe.reset_from("artist")
+        Pipeline(self.proj, "hero", client=self.client).run(auto_approve=True, log=quiet)
+        d = imaging.to_bytes(imaging.load_rgba(self.proj.asset("hero").output("export", "png")))
+        cols = {tuple(d[i:i + 3]) for i in range(0, len(d), 4) if d[i + 3]}
+        self.assertEqual(cols, {(0x30, 0x50, 0xa0), (0xe0, 0x20, 0x20)})   # the blue drawing was kept, not redrawn
+
+    def test_cancel_keeps_the_drawing_and_continue_resumes(self):
+        from pixelagent import cancel
+        self.proj.config["finish"] = {"mode": "artist", "max_usd": 1.5, "max_turns": 5, "face_turns": 3, "face_pass": False}
+        calls = []
+
+        def create(**kw):
+            calls.append(kw)
+            if len(calls) == 1:   # the user presses Cancel while the first round is running
+                cancel.request(self.proj.root, "hero")
+                out = self._draw([{"op": "rect", "x": 6, "y": 6, "w": 12, "h": 30, "color": "#3050a0", "fill": True}], "a1")
+            else:
+                out = [NS(type="function_call", name="finish", call_id=f"f{len(calls)}", arguments='{"summary": "done"}')]
+            return NS(id=f"r{len(calls)}", output=out, usage=NS(input_tokens=500, output_tokens=50,
+                                                                input_tokens_details=NS(cached_tokens=0)))
+        self.client.responses.create = create
+        self.proj.new_asset("hero", {"prompt": "hero"})
+        with self.assertRaises(cancel.Cancelled):
+            Pipeline(self.proj, "hero", client=self.client).run(auto_approve=True, log=quiet)
+        a = self.proj.asset("hero")
+        self.assertEqual((a.state.steps["artist"].status, a.state.status), ("pending", "cancelled"))
+        self.assertEqual(len(calls), 1)                                    # stopped within one round
+        self.assertFalse(cancel.requested(self.proj.root, "hero"))         # the request was used up
+        self.assertEqual(Pipeline(self.proj, "hero", client=self.client).run(auto_approve=True, log=quiet), "complete")
+        d = imaging.to_bytes(imaging.load_rgba(self.proj.asset("hero").output("export", "png")))
+        self.assertIn((0x30, 0x50, 0xa0), {tuple(d[i:i + 3]) for i in range(0, len(d), 4) if d[i + 3]})
+
     def test_unusable_map_falls_back_to_clusters(self):
         self.client.images.bad_map = True
         self.assertEqual(self._run("hero", {"prompt": "hero"}), "complete")

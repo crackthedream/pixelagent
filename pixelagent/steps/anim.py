@@ -275,6 +275,10 @@ def draw(ctx):
             live.publish(mcp, f"frame{k}", sess.turns, frame=k)  # the frame as it starts (from the previous one)
             stop, _ = sess.converse(f"frame{k}", instr, content, turns, fresh=True)
             stops.append(stop)
+            if stop == "cancelled":  # the user cancelled: keep finished frames; Continue resumes at this frame
+                ckpt.save(mcp, k)
+                from ..cancel import Cancelled
+                raise Cancelled(f"cancelled at frame {k + 1} of {n}")
             if stop.startswith("stopped") or sess.spent >= sess.max_usd:
                 # a spending limit stopped this frame: keep the finished frames and stop honestly, instead of
                 # copying frames forward and presenting an incomplete animation for review

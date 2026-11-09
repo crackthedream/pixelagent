@@ -11,7 +11,8 @@ const GATE_TEXT = {
 };
 const STEP_LABEL = (s) => s.label;
 
-const state = { overview: null, items: [], detailSig: "", pollTimer: null, zoom: "fit", pick: null, viewVersion: null };
+const state = { overview: null, items: [], detailSig: "", pollTimer: null, zoom: "fit", pick: null, viewVersion: null,
+  area: null, selecting: false };
 
 // ------------------------------------------------------------------ api
 
@@ -138,7 +139,8 @@ function route() {
 }
 
 window.addEventListener("hashchange", () => {
-  state.detailSig = ""; state.zoom = "fit"; state.pick = null; state.viewVersion = null; render();
+  state.detailSig = ""; state.zoom = "fit"; state.pick = null; state.viewVersion = null; state.area = null; state.selecting = false;
+  render();
 });
 
 async function refresh(force) {
@@ -321,6 +323,43 @@ async function renderDetail(id, fromRefresh) {
   wireDetail(d);
 }
 
+function reviseEstimate(area) {
+  const e = state.overview.estimates;
+  return estimateText(area ? e.revise_area : e.revise_whole);
+}
+
+function areaLabel(a) { return `x ${a.x}, y ${a.y}, ${a.w} × ${a.h} px`; }
+
+// a note, optionally with an area dragged on the sprite: the model revises the current drawing (only inside the area)
+function reviseControls(d) {
+  const a = state.area;
+  return `<div class="revise">
+      <div class="note-row"><input class="input" id="note" placeholder="${a ? "What should change in this area?" : "What should change? For example: make the eyes larger"}">
+        <button class="btn" id="btn-revise">${a ? "Fix this area" : "Revise"}</button></div>
+      <div class="revise-meta">
+        ${a ? `<span class="area-chip">${icon("photo")}${esc(areaLabel(a))}<button class="chip-x" id="area-clear" aria-label="Clear the area">${icon("x")}</button></span>`
+          : `<button class="btn plain" id="btn-area">${state.selecting ? "Drag on the sprite to select an area" : "Select an area"}</button>`}
+        <span class="muted">${esc(reviseEstimate(!!a))}</span>
+        <span class="muted hint">To start over instead, use Redo next to Drawing in Progress.</span>
+      </div></div>`;
+}
+
+function stopMessage(err) {
+  if (err.startsWith("BudgetExceeded:")) {
+    const why = err.slice("BudgetExceeded:".length).trim();
+    return `<div class="job-error"><strong>Stopped at a spending limit.</strong> ${esc(why.charAt(0).toUpperCase() + why.slice(1))}.
+      <div style="margin-top:6px"><a class="link" href="#/settings">Open Settings</a></div></div>`;
+  }
+  return `<div class="job-error"><strong>Stopped with an error.</strong> Fix the cause, then choose Try again.
+    <details><summary>Details</summary><code>${esc(err)}</code></details></div>`;
+}
+
+function revisePanel(d) {
+  return `<div class="decision quiet-card"><div class="decision-head"><div><h2>Revise</h2>
+      <div class="muted">Describe a change. The model adjusts the current sprite (or only the area you select) and you approve the result.</div></div></div>
+    ${reviseControls(d)}</div>`;
+}
+
 function liveText(l) {
   const what = l.frame !== null && l.frame !== undefined ? `Drawing frame ${l.frame + 1} of ${l.frames}` : "Drawing live";
   return l.turn ? `${what}, round ${l.turn}` : what;
@@ -347,8 +386,7 @@ function inspector(d) {
   if (d.reference) facts.push(["Reference", `<a class="link" href="${esc(d.reference)}" target="_blank" rel="noopener">View image</a>`]);
   if (d.character) facts.push(["Character", `<a class="link" href="#/item/${encodeURIComponent(d.character)}">${esc(d.character_name || "Open")}</a>`]);
   let html = `<div class="card"><h2>Progress</h2><ol class="steps">${steps}</ol>
-      ${d.job_error ? `<div class="job-error"><strong>Stopped with an error.</strong> Fix the cause, then choose Try again.
-        <details><summary>Details</summary><code>${esc(d.job_error)}</code></details></div>` : ""}</div>
+      ${d.job_error ? stopMessage(d.job_error) : ""}</div>
     <div class="card"><h2>Details</h2><dl class="kv">${facts.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("")}</dl></div>`;
   const vers = (d.versions && d.versions.items) || [];
   if (vers.length > 1) {
@@ -379,14 +417,19 @@ function inspector(d) {
 function decisionPanel(d) {
   const g = d.gate_detail;
   if (d.paused && !d.job_error && !d.failed) {
-    return `<div class="decision"><div class="decision-head"><span class="dot"></span><div><h2>Paused</h2>
-        <div class="muted">The run stopped before it finished, for example because the app was closed. Nothing is lost.</div></div></div>
+    const cancelled = d.status === "cancelled";
+    return `<div class="decision"><div class="decision-head"><span class="dot"></span><div><h2>${cancelled ? "Cancelled" : "Paused"}</h2>
+        <div class="muted">${cancelled ? "Everything finished so far is kept. Continue picks up where it stopped."
+          : "The run stopped before it finished, for example because the app was closed. Nothing is lost."}</div></div></div>
       <div class="decision-actions"><div class="spacer"></div><button class="btn primary lg" id="btn-continue">Continue</button></div></div>`;
   }
   if (d.running) {
-    return `<div class="decision quiet"><span class="spinner"></span><div><strong>${esc(currentStep(d))}</strong>
-      <div class="muted">You can leave this page. The run keeps going and stops when it needs you.</div></div></div>`;
+    return `<div class="decision quiet"><span class="spinner"></span><div class="grow"><strong>${esc(currentStep(d))}</strong>
+      <div class="muted">${d.cancelling ? "Stopping after the current step. Everything finished so far is kept."
+        : "You can leave this page. The run keeps going and stops when it needs you."}</div></div>
+      <button class="btn" id="btn-cancel" ${d.cancelling ? "disabled" : ""}>${d.cancelling ? "Stopping…" : "Cancel"}</button></div>`;
   }
+  if (!g && d.can_revise) return revisePanel(d, false);
   if (!g) return "";
   const head = (title, sub) => `<div class="decision-head"><span class="dot wait"></span><div><h2>${esc(title)}</h2>
       ${sub ? `<div class="muted">${esc(sub)}</div>` : ""}</div></div>`;
@@ -423,7 +466,7 @@ function decisionPanel(d) {
     const c = g.critique;
     return `<div class="decision">${head("Approve the sprite", c ? `Quality check: ${c.overall} out of 10` : "")}
       ${c && c.issues.length ? `<ul class="issues">${c.issues.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>` : ""}
-      ${noteRow("What should change? For example: make the eyes larger", "Redraw")}
+      ${reviseControls(d)}
       <div class="decision-actions"><div class="spacer"></div><button class="btn primary lg" id="btn-approve">Approve and export</button></div></div>`;
   }
   if (g.kind === "poses") {
@@ -460,6 +503,7 @@ function wireDetail(d) {
       img.style.imageRendering = isPixel ? "" : "auto";  // nearest-neighbour downscaling would make paintings jagged
       const tools = $(".hero-tools");
       if (tools) tools.hidden = !isPixel;
+      drawArea();
     };
     img.complete ? apply() : img.addEventListener("load", apply);
     window.onresize = apply;
@@ -529,6 +573,17 @@ function wireDetail(d) {
     state.pick = null;
     act(() => api("/api/decide", body), msg);
   });
+  on("#btn-cancel", () => act(() => api("/api/cancel", { project: p, id: d.id }), "Stopping after the current step"));
+  on("#btn-area", () => { state.selecting = !state.selecting; state.detailSig = ""; render(); });
+  on("#area-clear", () => { state.area = null; state.selecting = false; state.detailSig = ""; render(); });
+  on("#btn-revise", () => {
+    const note = ($("#note") || {}).value || "";
+    if (!note.trim()) { toast("Say what should change first", true); $("#note").focus(); return; }
+    const a = state.area, box = a ? [a.x, a.y, a.w, a.h] : null;
+    state.area = null; state.selecting = false;
+    act(() => api("/api/fix", { project: p, id: d.id, note, box }), a ? "Fixing the area" : "Revising the sprite");
+  });
+  wireAreaSelect();
   on("#btn-reject", () => {
     const note = ($("#note") || {}).value || "";
     if (!note.trim()) { toast("Say what should change first", true); $("#note").focus(); return; }
@@ -950,4 +1005,58 @@ async function renderDeleted() {
     confirm: "Delete All", danger: true,
     onConfirm: async () => { await act(() => api("/api/trash/empty", {}), "Everything in Recently Deleted was deleted"); render(); },
   });
+}
+
+
+// ------------------------------------------------------------------ selecting an area on the sprite
+
+function spritePixel(img, e) {
+  const r = img.getBoundingClientRect();
+  return {
+    x: Math.max(0, Math.min(img.naturalWidth - 1, Math.floor((e.clientX - r.left) / r.width * img.naturalWidth))),
+    y: Math.max(0, Math.min(img.naturalHeight - 1, Math.floor((e.clientY - r.top) / r.height * img.naturalHeight))),
+  };
+}
+
+function drawArea() {
+  const hero = $("#hero"), img = $("#hero-img");
+  let box = $("#area-box");
+  if (!hero || !img || !state.area) { if (box) box.remove(); return; }
+  if (!box) { box = document.createElement("div"); box.id = "area-box"; box.className = "area-box"; hero.appendChild(box); }
+  const r = img.getBoundingClientRect(), h = hero.getBoundingClientRect(), k = r.width / img.naturalWidth;
+  box.style.left = (r.left - h.left + state.area.x * k) + "px";
+  box.style.top = (r.top - h.top + state.area.y * k) + "px";
+  box.style.width = (state.area.w * k) + "px";
+  box.style.height = (state.area.h * k) + "px";
+}
+
+function wireAreaSelect() {
+  const hero = $("#hero"), img = $("#hero-img");
+  if (!hero || !img) return;
+  hero.classList.toggle("selecting", state.selecting);
+  drawArea();
+  if (!state.selecting) return;
+  let start = null;
+  img.ondragstart = (e) => e.preventDefault();
+  hero.onpointerdown = (e) => {
+    if (e.target.closest(".hero-tools")) return;
+    start = spritePixel(img, e);
+    state.area = { x: start.x, y: start.y, w: 1, h: 1 };
+    hero.setPointerCapture(e.pointerId);
+    drawArea();
+  };
+  hero.onpointermove = (e) => {
+    if (!start) return;
+    const q = spritePixel(img, e);
+    state.area = { x: Math.min(start.x, q.x), y: Math.min(start.y, q.y), w: Math.abs(q.x - start.x) + 1, h: Math.abs(q.y - start.y) + 1 };
+    drawArea();
+  };
+  hero.onpointerup = () => {
+    if (!start) return;
+    start = null;
+    state.selecting = false;
+    state.detailSig = "";
+    render();
+    setTimeout(() => { const n = $("#note"); if (n) n.focus(); }, 50);
+  };
 }
