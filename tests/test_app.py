@@ -21,9 +21,6 @@ class AppServerTest(unittest.TestCase):
         cls.projects = os.path.join(cls.tmp, "projects")
         cls.patch = mock.patch.object(server, "SETTINGS_FILE", os.path.join(cls.tmp, "settings.json"))
         cls.patch.start()
-        cls.trash = os.path.join(cls.tmp, "trash")  # deletes go here, never to the real Recycle Bin
-        cls.env = mock.patch.dict(os.environ, {"PIXELAGENT_TRASH_DIR": cls.trash})
-        cls.env.start()
         server.save_settings({**server.default_settings(), "projects_dir": cls.projects, "backend": "dry_run"})
         cls.httpd = server.AppServer(("127.0.0.1", 0), server.Handler)
         cls.port = cls.httpd.server_address[1]
@@ -34,7 +31,6 @@ class AppServerTest(unittest.TestCase):
         cls.httpd.shutdown()
         cls.httpd.server_close()
         cls.patch.stop()
-        cls.env.stop()
         shutil.rmtree(cls.tmp, ignore_errors=True)
 
     # -- helpers
@@ -294,13 +290,59 @@ class AppServerTest(unittest.TestCase):
         self.ok(self.post("/api/item/delete", {"project": pid, "id": "hero", "with_animations": True}))
         ids = [i["id"] for i in self.ok(self.get("/api/assets?project=Manage"))["items"]]
         self.assertEqual(ids, ["hero-copy"])
-        trashed = os.listdir(self.trash)
-        self.assertTrue(any(n.startswith("hero-walk-") for n in trashed), trashed)          # the animation
-        self.assertTrue(any(n.startswith("hero-") and not n.startswith(("hero-walk", "hero-copy"))
-                            for n in trashed), trashed)                                     # and the character
+        # the character and its animation are one entry in Recently Deleted
+        entries = [e for e in self.ok(self.get("/api/trash"))["items"] if e["project"] == "Manage"]
+        self.assertEqual(len(entries), 1)
+        e = entries[0]
+        self.assertEqual((e["kind"], e["name"], e["animations"]), ("items", "Brave Hero", 1))
         # a deleted item is a clean 404 for the app to explain
         status, data = self.get("/api/asset?project=Manage&id=hero")
         self.assertEqual((status, data.get("not_found")), (404, True))
+        # restore brings both back, the animation still linked to its character
+        r = self.ok(self.post("/api/trash/restore", {"entry": e["entry"]}))
+        self.assertEqual(r["id"], "hero")
+        self.assertEqual(self.asset(pid, "hero")["animations"], ["hero-walk"])
+        self.assertEqual([x for x in self.ok(self.get("/api/trash"))["items"] if x["project"] == "Manage"], [])
+
+    def test_restore_never_overwrites(self):
+        pid = self.new_project("Clash")
+        proj = Project(os.path.join(self.projects, pid))
+        proj.new_asset("hero", {"prompt": "first"})
+        self.ok(self.post("/api/item/delete", {"project": pid, "id": "hero"}))
+        proj.new_asset("hero", {"prompt": "second"})              # a new item took the same id meanwhile
+        e = [x for x in self.ok(self.get("/api/trash"))["items"] if x["project"] == pid][0]
+        r = self.ok(self.post("/api/trash/restore", {"entry": e["entry"]}))
+        self.assertEqual(r["id"], "hero-2")
+        self.assertEqual(proj.asset("hero").state.inputs["prompt"], "second")
+        self.assertEqual(proj.asset("hero-2").state.inputs["prompt"], "first")
+        self.assertEqual(proj.asset("hero-2").state.id, "hero-2")
+
+    def test_delete_now_and_empty_are_permanent_and_explicit(self):
+        pid = self.new_project("Bin")
+        proj = Project(os.path.join(self.projects, pid))
+        for n in ("one", "two", "three"):
+            proj.new_asset(n, {"prompt": n})
+            self.ok(self.post("/api/item/delete", {"project": pid, "id": n}))
+        mine = lambda: [x for x in self.ok(self.get("/api/trash"))["items"] if x["project"] == pid]  # noqa: E731
+        self.assertEqual(len(mine()), 3)
+        self.ok(self.post("/api/trash/delete", {"entry": mine()[0]["entry"]}))
+        self.assertEqual(len(mine()), 2)
+        self.assertEqual(self.post("/api/trash/delete", {"entry": "../../projects"})[0], 400)  # never a path
+        removed = self.ok(self.post("/api/trash/empty", {}))["removed"]
+        self.assertGreaterEqual(removed, 2)
+        self.assertEqual(mine(), [])
+        self.assertEqual(self.ok(self.get("/api/overview"))["trash_count"], 0)
+
+    def test_item_ids_cannot_leave_their_project(self):
+        # review finding F03: mutations joined the raw id to the assets folder
+        a, b = self.new_project("Home"), self.new_project("Other")
+        Project(os.path.join(self.projects, b)).new_asset("hero", {"prompt": "x"})
+        for bad in ("../../Other/assets/hero", "..\\..\\Other\\assets\\hero", "C:/Windows", "/etc", "hero/../x", ""):
+            for path, extra in (("/api/item/delete", {}), ("/api/item/rename", {"name": "X"}),
+                                ("/api/item/duplicate", {}), ("/api/run", {}), ("/api/redo", {"stage": "Plan"})):
+                status, _ = self.post(path, {"project": a, "id": bad, **extra})
+                self.assertEqual(status, 400, (path, bad))
+        self.assertEqual(Project(os.path.join(self.projects, b)).asset_ids(), ["hero"])
 
     def test_items_that_are_working_cannot_be_changed(self):
         pid = self.new_project("Busy")
@@ -333,7 +375,13 @@ class AppServerTest(unittest.TestCase):
         self.assertEqual(o["current"], "New name")  # the open project follows its new name
         self.ok(self.post("/api/project/delete", {"project": "New name"}))
         self.assertNotIn("New name", self.ok(self.get("/api/overview"))["projects"])
-        self.assertTrue(any(n.startswith("New name-") for n in os.listdir(self.trash)))
+        e = [x for x in self.ok(self.get("/api/trash"))["items"] if x["kind"] == "project" and x["name"] == "New name"]
+        self.assertEqual(len(e), 1)
+        # restoring next to a project of the same name gives it a free name
+        self.new_project("New name")
+        r = self.ok(self.post("/api/trash/restore", {"entry": e[0]["entry"]}))
+        self.assertEqual(r["project"], "New name (2)")
+        self.assertIn("New name (2)", self.ok(self.get("/api/overview"))["projects"])
 
 
 class StoreSaveTest(unittest.TestCase):

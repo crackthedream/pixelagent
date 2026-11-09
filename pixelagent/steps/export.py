@@ -3,6 +3,7 @@ import json
 import os
 import shutil
 
+from ..names import safe_filename
 from .. import imaging
 
 
@@ -11,7 +12,7 @@ def run(ctx):
     doc = ctx.load_project("critique" if crit and "project" in crit.outputs else "polish")
     spec = ctx.spec()
     final = imaging.from_bytes(doc.w, doc.h, doc.composite())
-    name = spec.name.replace(" ", "_") or ctx.asset.id
+    name = safe_filename(spec.name, fallback=ctx.asset.id)  # the display name may contain '/', ':', '..' etc.
     ctx.save_image("png", f"{name}.png", final)
     ctx.save_image("png_x4", f"{name}_x4.png", imaging.zoom(final, 4))
     layer_dir = ctx.path("layers")
@@ -19,7 +20,7 @@ def run(ctx):
     for i, l in enumerate(doc.layers):
         if l.reference:
             continue
-        imaging.from_bytes(doc.w, doc.h, l.cels[0]).save(os.path.join(layer_dir, f"{i:02d}_{l.name}.png"))
+        imaging.from_bytes(doc.w, doc.h, l.cels[0]).save(ctx.path(f"layers/{i:02d}_{safe_filename(l.name, 'layer')}.png"))
     ctx.outputs["layers"] = layer_dir
     proj = ctx.save_project("project", doc)
     meta = {

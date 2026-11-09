@@ -22,6 +22,7 @@ from ..config import resource_path
 from ..pipeline import Pipeline
 from ..schemas import CharacterSpec
 from ..store import Project
+from ..trash import RecentlyDeleted
 from ..live import read_live
 
 STATIC = resource_path("pixelagent", "app", "static")
@@ -95,11 +96,16 @@ def save_settings(s):
     os.replace(tmp, SETTINGS_FILE)
 
 
+def ledger_path():
+    """The spending ledger lives with the settings, not in any project folder (review finding F02)."""
+    return os.path.join(os.path.dirname(os.path.abspath(SETTINGS_FILE)), "ledger.jsonl")
+
+
 def overrides(s):
     # one monthly limit for everything in the projects folder, and a limit per item
     return {"backend": {"mode": s["backend"]},
             "budget": {"monthly_usd": float(s["monthly_usd"]), "max_usd_per_asset": float(s.get("asset_usd", 3.0)),
-                       "monthly_scope_dir": s["projects_dir"]},
+                       "monthly_scope_dir": s["projects_dir"], "ledger": ledger_path()},
             "style": {"sprite_height": int(s["sprite_height"])}}
 
 
@@ -317,7 +323,8 @@ def asset_detail(settings, pid, proj, aid):
     for v in pipe.versions(step):
         img = next((v["outputs"][k] for k in keys if k in v["outputs"]), None)
         if img and os.path.exists(a.path(img)):
-            vers.append({"version": v["version"], "url": file_url(pid, a, img), "time": v["time"], "current": v["current"]})
+            vers.append({"version": v["version"], "url": file_url(pid, a, img), "time": v["time"], "current": v["current"],
+                         "compatible": v["compatible"]})
     d["versions"] = {"step": step, "items": vers}
     test_mode = settings.get("backend") == "dry_run"
     d["redo"] = {label: (0.0 if test_mode else usd) for label, usd in REDO_USD[d["kind"]].items()}
@@ -361,6 +368,7 @@ def start_run(settings, pid, aid, check=True, **kw):
     if check:
         spend_check(settings, pid, aid)
     proj = Project(project_path(settings, pid), overrides(settings))
+    proj.asset(aid)  # a valid id of an existing item, checked before anything starts
 
     def job(log):
         Pipeline(proj, aid).run(log=log, **kw)
@@ -507,18 +515,27 @@ def duplicate_item(settings, body):
     return {"id": new}
 
 
+def trash(settings):
+    return RecentlyDeleted(settings["projects_dir"])
+
+
 def delete_item(settings, body):
-    from ..trash import send_to_trash
     pid, aid = body["project"], body["id"]
     proj = Project(project_path(settings, pid), overrides(settings))
     a = proj.asset(aid)
-    anims = animations_of(proj, aid) if a.state.inputs.get("kind") != "animation" else []
+    kind = a.state.inputs.get("kind", "character")
+    anims = animations_of(proj, aid) if kind != "animation" else []
     if anims and not body.get("with_animations"):
         raise ValueError(f"this character has {len(anims)} animation(s); confirm deleting them too")
     _not_running(pid, [aid] + anims)
-    for x in anims + [aid]:  # animations first: a delete that stops halfway never leaves orphans
-        send_to_trash(proj.asset(x).dir)
-    return {"ok": True, "deleted": anims + [aid]}
+    summary = asset_summary(settings, pid, proj, aid, a)
+    t = thumb_of(a)
+    # the character and its animations move together, as one entry that restores as one
+    trash(settings).delete_items(proj.root, [aid] + anims,
+                                 {"name": summary["name"], "item_kind": kind, "animations": len(anims),
+                                  "character_name": summary.get("character_name")},
+                                 thumb=a.path(t) if t else None)
+    return {"ok": True, "deleted": [aid] + anims}
 
 
 def _project_busy(pid):
@@ -545,14 +562,22 @@ def rename_project(settings, body):
 
 
 def delete_project(settings, body):
-    from ..trash import send_to_trash
     pid = body["project"]
     path = project_path(settings, pid)
     if not os.path.isdir(os.path.join(path, "assets")):
         raise ValueError("no such project")
     if _project_busy(pid):
         raise ValueError("wait until everything in this project has finished working")
-    send_to_trash(path)
+    proj = Project(path)
+    ids = proj.asset_ids()
+    thumb = None
+    for x in ids:  # the project's first picture, for the Recently Deleted list
+        t = thumb_of(proj.asset(x))
+        if t:
+            thumb = proj.asset(x).path(t)
+            break
+    chars = sum(1 for x in ids if proj.asset(x).state.inputs.get("kind", "character") != "animation")
+    trash(settings).delete_project(path, {"name": pid, "items": len(ids), "characters": chars}, thumb=thumb)
     if settings.get("current_project") == pid:
         settings["current_project"] = None
         save_settings(settings)
@@ -587,6 +612,24 @@ def redo_from(settings, body):
     pipe.reset_from(first)
     start_run(settings, pid, aid)
     return {"ok": True}
+
+
+def trash_list(settings):
+    out = []
+    for e in trash(settings).entries():
+        out.append({"entry": e["entry"], "kind": e["kind"], "name": e.get("name"), "project": e.get("project"),
+                    "item_kind": e.get("item_kind"), "animations": e.get("animations", 0), "items": e.get("items"),
+                    "character_name": e.get("character_name"), "deleted_at": e.get("deleted_at"),
+                    "thumb": f"/trashfile?entry={e['entry']}&name={e['thumb']}" if e.get("thumb") else None})
+    return {"items": out}
+
+
+def trash_restore(settings, body):
+    r = trash(settings).restore(body["entry"])
+    if r["kind"] == "project" and not settings.get("current_project"):
+        settings["current_project"] = r["project"]
+        save_settings(settings)
+    return r
 
 
 def open_item(settings, body):
@@ -672,17 +715,22 @@ class Handler(BaseHTTPRequestHandler):
                 if not p.startswith(root + os.sep):
                     return self.send_error(403)
                 return self._file(p, cache=True)
+            if u.path == "/trashfile":  # thumbnails of deleted items
+                return self._file(trash(s).path(q["entry"], q["name"]), cache=True)
+            if u.path == "/api/trash":
+                return self._json(trash_list(s))
             if u.path == "/api/ping":  # heartbeat from an open window (keeps the packaged app alive)
                 return self._json({"ok": True})
             if u.path == "/api/overview":
                 projects = list_projects(s)
                 cur = s.get("current_project") if s.get("current_project") in projects else (projects[0] if projects else None)
-                from ..store import month_spend_all
-                spent = month_spend_all(s["projects_dir"])
+                from ..store import ledger_month_spend
+                spent = ledger_month_spend(ledger_path(), seed_dir=s["projects_dir"])
                 return self._json({"projects": projects, "current": cur, "settings": {
                     "backend": s["backend"], "monthly_usd": s["monthly_usd"], "asset_usd": s.get("asset_usd", 3.0),
                     "sprite_height": s["sprite_height"], "projects_dir": s["projects_dir"], "key_found": key_found()},
-                    "month_spent": round(spent, 2), "estimates": ESTIMATES})
+                    "month_spent": round(spent, 2), "estimates": ESTIMATES,
+                    "trash_count": len(trash(s).entries())})
             if u.path == "/api/assets":
                 proj = Project(project_path(s, q["project"]))
                 items = [asset_summary(s, q["project"], proj, aid) for aid in proj.asset_ids()]
@@ -738,6 +786,13 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(restore_version(s, body))
             if u.path == "/api/redo":
                 return self._json(redo_from(s, body))
+            if u.path == "/api/trash/restore":
+                return self._json(trash_restore(s, body))
+            if u.path == "/api/trash/delete":  # permanent: only from the user's explicit, confirmed action
+                trash(s).delete_now(body["entry"])
+                return self._json({"ok": True})
+            if u.path == "/api/trash/empty":  # permanent: only from the user's explicit, confirmed action
+                return self._json({"removed": trash(s).empty()})
             if u.path == "/api/item/rename":
                 return self._json(rename_item(s, body))
             if u.path == "/api/item/duplicate":

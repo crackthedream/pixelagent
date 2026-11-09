@@ -463,3 +463,18 @@ details summary { cursor: default; color: var(--text-2); font-size: 12px; }
 .banner span { flex: 1; }
 .banner.warn { background: color-mix(in srgb, var(--orange) 14%, transparent); }
 .banner.bad { background: color-mix(in srgb, var(--red) 12%, transparent); }
+
+/* ------------------------------------------------------------- Recently Deleted */
+.side-item .count { margin-left: auto; font-size: 11px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+.tile.deleted { cursor: default; }
+.tile.deleted .stage { opacity: .9; }
+.tile-actions { display: flex; gap: 6px; margin-top: 6px; }
+.tile-actions .btn { height: 26px; font-size: 12px; }
+.btn.plain.danger { color: var(--red); }
+.kind-badge { position: absolute; left: 10px; top: 10px; display: flex; align-items: center; gap: 5px; padding: 3px 8px 3px 6px;
+  border-radius: var(--r-pill); font-size: 11px; font-weight: 500;
+  background: color-mix(in srgb, var(--surface) 82%, transparent); backdrop-filter: blur(10px); box-shadow: var(--shadow-1); }
+.kind-badge .ic { width: 13px; height: 13px; }
+.version.old .stage { opacity: .45; }
+.version-bar .vb-note { font-weight: 400; font-size: 12px; }
+p.small { font-size: 11px; margin: 8px 0 0; }

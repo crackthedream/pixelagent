@@ -34,7 +34,10 @@ These come from the owner and from incidents during development. Treat them as r
 7. **UI style: Apple-like** (macOS app conventions, see section 10). The owner asked for high aesthetic quality.
 8. **Git:** commit or push only when the owner asks. Scan for secrets before every commit. Commits have gone to
    `main` so far.
-9. **Deleting files:** move them to the Recycle Bin (recoverable), never hard-delete the owner's work.
+9. **Deleting files:** never hard-delete the owner's work. In the app, deleting moves work to **Recently Deleted**
+   (`<projects folder>/.Recently Deleted`, `pixelagent/trash.py`), where it can be restored; only the owner's
+   explicit, confirmed Delete Now / Delete All removes files for good. (The Windows Recycle Bin is not used for
+   this: with FOF_ALLOWUNDO it silently deletes permanently when recycling is unavailable; review finding F01.)
 10. **Downloads/installs** (packages, tools) need the owner's permission first: say the name, the source and the size.
 11. **Environment quirks:** Windows 11, Python 3.13 at `D:\python\Python313`. The user folder contains non-ASCII
     characters (`C:\Users\孙炜`), so always open files with `encoding="utf-8"` and pass paths as arguments. Git
@@ -291,8 +294,12 @@ runs were cleaned up.
   `projects_dir` (default `~/Documents/PixelAgent`), `backend` (`openai` | `dry_run`), `monthly_usd` (90, one
   limit for all projects together), `asset_usd` (3, limit per item including redraws), `sprite_height`
   (64/96/128, default 96), `current_project`.
-- Deletes go to the Windows Recycle Bin (`pixelagent/trash.py`, shell API, restorable); `PIXELAGENT_TRASH_DIR`
-  redirects them to a folder (tests).
+- Deletes go to **Recently Deleted** (`pixelagent/trash.py`): a character moves together with its animations
+  as one entry (`entry.json` + `payload/` + a thumbnail); Restore puts it back under a free name if the old one is
+  taken (and recreates a deleted project folder), Delete Now and Delete All remove for good after a confirmation.
+- Spending: the app records every paid call in a ledger next to the settings (`~/.pixelagent/ledger.jsonl`),
+  independent of project folders, so deleting or moving projects never lowers the month's total (finding F02).
+  A missing ledger is seeded once from the projects' `costs.jsonl`.
 - Live drawing: after every drawing round the artist exports its drawing (never the tracing layer) to
   `<asset>/live/live.png` + `live.json` (`pixelagent/live.py`); the app shows it while the item runs.
 
@@ -302,6 +309,7 @@ GET `/`, `/static/*`, `/files?project=&path=` (confined to the project folder), 
 POST `/api/projects`, `/api/current`, `/api/characters` (prompt and/or data-URL reference image),
 `/api/animations`, `/api/decide` (approve / reject with note / pick / edited spec at gate A), `/api/run`
 (start or continue), `/api/open` (PixelLiner or folder), `/api/settings` (validated; optional API key),
+`/api/trash` (GET), `/api/trash/restore|delete|empty`, `/trashfile` (thumbnails),
 `/api/item/rename|duplicate|delete`, `/api/project/rename|delete|open`, `/api/versions/restore`
 (make an older sprite/frames version current; later cheap steps rerun), `/api/redo` (rerun from a milestone).
 A missing item answers 404 with `not_found`. Paid actions check the limits first (`spend_check`) and refuse
@@ -379,23 +387,45 @@ Poses, Frame traces, Drawing frames, Your approval, Export.
 
 ## 11. Tests
 
-77 `unittest` tests in `tests/`, all in dry-run mode or with scripted fake models:
+94 `unittest` tests in `tests/`, all free (dry-run mode or scripted fake models):
 
 | File | Tests | Covers |
 |---|---|---|
-| `test_pipeline.py` | 11 | Steps, gates, versions, resume |
+| `test_pipeline.py` | 11 | Steps, gates, versions, resume; test runs ignore paid limits |
 | `test_quality_mechanisms.py` | 15 | Section 7 mechanisms |
-| `test_openai_backend.py` | 12 | Request shapes, strict schemas, cost math (mocked) |
-| `test_artist.py` | 8 | Artist agent tools/session; the face pass starts a fresh conversation |
-| `test_animation.py` | 5 | Animation steps |
-| `test_app.py` | 16 | App API end-to-end, references, animation review, security, paused runs, managing items and projects, single instance, save retry |
+| `test_openai_backend.py` | 13 | Request shapes, strict schemas, cost math (mocked); a limit stops the artist honestly and it continues later |
+| `test_artist.py` | 9 | Artist agent tools/session; fresh face pass; two views in one round are two images |
+| `test_animation.py` | 6 | Animation steps; a limit stops the frames honestly and resumes; play-once GIFs |
+| `test_app.py` | 19 | App API end-to-end, references, animation review, security, item ids, paused runs, managing items and projects, Recently Deleted, single instance, save retry |
 | `test_live.py` | 5 | Live drawing through the real engine (never the trace), staleness, shown only while running |
-| `test_budget.py` | 5 | One monthly limit for all projects, limit per item, refusing before creating, free final export, drawing loop stopping |
+| `test_budget.py` | 7 | One monthly limit, the ledger survives deleting projects, seeding, limit per item, refusing before creating, free final export, drawing loop stopping |
+| `test_face.py` | 3 | Face trace keeps small dark features, only face cells change |
+| `test_names.py` | 3 | Safe file names, a hostile name exports inside its folder, step outputs cannot leave their folder |
+| `test_review_fixes.py` | 3 | Restores only from the same inputs, interrupted version folders kept and skipped, the trace cannot be copied |
 
 Note: dry-run stubs exercise the plumbing only. The stub labeller groups clusters by hue and can merge
 materials, and the artist step is skipped in dry-run mode. Visual quality can only be judged with real models.
 
 ---
+
+## 11b. Review of `de5e3a2` (Codex, 2026-11-09): all 11 findings fixed
+
+| ID | Finding | Fix | Regression test |
+|---|---|---|---|
+| F01 | Recycle Bin delete could be permanent | Recently Deleted folder; permanent only by explicit, confirmed action | `test_app` Recently Deleted tests |
+| F02 | Deleting a project removed its spending | App ledger outside project folders, seeded once | `test_budget.test_deleting_a_project_keeps_its_spending` |
+| F03 | Asset ids could reach another project | `Project.asset` accepts only a plain id; runs check the item before starting | `test_app.test_item_ids_cannot_leave_their_project` |
+| F04 | Display names became unsafe paths | `names.safe_filename` for exports, layers, regions; `Ctx.path` refuses paths leaving the step folder | `test_names` |
+| F05 | Restores mixed versions with newer inputs | Each version records the versions it was made from; only matching ones restore; UI dims the others | `test_review_fixes.RestoreTests` |
+| F06 | A spending stop reached review as complete | Stops are explicit errors; finished frames / the drawing are kept as checkpoints and resumed | `test_animation`, `test_openai_backend` stop tests |
+| F07 | Two `view`s in one round gave the model the same image | Per-session image sequence in file names | `test_artist.test_two_views_in_one_round_reach_the_model_as_two_images` (fails on the old code) |
+| F08 | The trace could be copied into the drawing | Guard resolves the reference layer by name and index for `from_layer` and `layer` | `test_review_fixes.ReferenceGuardTests` |
+| F09 | An interrupted run's folder could be reused | Next free folder, reserved in `state.json` before writing | `test_review_fixes.VersionFolderTests` |
+| F10 | Test runs failed when paid limits were used up | Stand-in models never check paid limits | `test_pipeline.test_test_runs_ignore_paid_limits` |
+| F11 | Play-once animations looped in preview/4x GIFs | One rule for all GIFs; play once = no NETSCAPE block (engine `gif.py`) | `test_animation` (stop test checks all GIFs) |
+
+Also from the review: the unused `openai-agents` dependency was removed. Not done yet (release items, owner's call):
+license, dependency lock and pinned engine revision in the build, CI, clean-machine test.
 
 ## 12. Known issues and limits
 
@@ -405,8 +435,9 @@ materials, and the artist step is skipped in dry-run mode. Visual quality can on
 2. **Versions** are listed for the sprite drawing and the animation frames only (concept versions stay on disk
    but are not shown). Animations drawn before 2026-11-09 have no 1x GIF or per-frame PNGs, so their oldest
    version thumbnail is the 4x GIF and their review shows the frame strip instead of tiles.
-3. **Budget scope:** the app's monthly limit covers every project in its projects folder; command-line runs
-   (`python -m pixelagent`) still count their own project only.
+3. **Budget scope:** the app's monthly limit uses its ledger (all app runs, also from deleted projects);
+   command-line and benchmark runs (`python -m pixelagent`, `benchmarks/`) count their own project only and are
+   not in the app's ledger.
 4. **Faces at 96 px** are much better than at 64 px but remain the weakest part. Model judges cannot rate them
    reliably; the owner's blind ratings (face lab round 1) kept today's face pass over two alternatives.
 5. **Character-tuned pipeline.** `CharacterSpec.asset_type` accepts `prop`, `tile` and `scene`, but the steps
@@ -467,7 +498,7 @@ app sheet ("New object", "New background") and benchmark.
 | Size | 64-128 px tall | 16-48 px (icons, items, props) | 320x180, 480x270 or wider; tileable strips |
 | Concept | Image model, flat background, gate B | Same, item centred, 2-4 drafts | Layout plan first (layers: sky, far, mid, near, ground), then one image per layer, wide aspect, seamless horizontally |
 | Conversion | Material map, pixelize, ramps, trace | Same steps, object material names, no face pass | Per layer: palette per scene (atmospheric perspective: far layers lower contrast and cooler), optional dithering |
-| Model drawing | Artist redraws every pixel over the trace, then a face pass | Artist redraws over the trace (small, cheap) | Too large to redraw pixel by pixel: targeted passes on regions (focal points, edges, seams) |
+| Model drawing | Artist redraws every pixel over the trace, then a face pass | Artist redraws over the trace (small, cheap) | Too large to redraw pixel by pixel: converted pixels may stay, plus targeted model passes on regions (focal points, edges, seams); the owner approved this (2026-11-09) |
 | Checks | Lint, critic, face, frame consistency | Lint, silhouette readability at 1x | Seam lint (left/right edges match), parallax layer alpha, colour count per layer |
 | Export | PNG, layers, animation | PNG, icon sizes, item sheet | Layered parallax PNGs, tileable strips, a PixelLiner project |
 
@@ -506,6 +537,8 @@ app sheet ("New object", "New background") and benchmark.
 | UI | Local web UI in an app window, Apple-style, packaged as an .exe |
 | Focus | Characters first. Objects and backgrounds later, from prompts, each as its own workflow (2026-11-09) |
 | Faces | Judged by the owner's blind ratings (benchmarks/face_lab.py), not by model judges |
+| Deleting | Recently Deleted inside the app with Restore, Delete Now and Delete All, instead of the Windows Recycle Bin (2026-11-09) |
+| Final pixels | Characters and animations: every final pixel drawn by the model. Backgrounds: converted pixels may remain, with targeted model passes (2026-11-09) |
 | Repos | Private: `crackthedream/pixelagent`, `crackthedream/pixelliner-mcp` |
 
 ---

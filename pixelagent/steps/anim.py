@@ -221,7 +221,7 @@ def draw(ctx):
         drawing.cels = [bytearray(t) for t in traces]
         ctx.save_project("project", doc)
         ctx.info["dry_run"] = "frames = traces (the artist agent needs a real model)"
-        _finish(ctx, doc)
+        _finish(ctx, doc, loop=spec.loop)
         return
 
     from ..agent_session import AgentSession
@@ -248,7 +248,14 @@ def draw(ctx):
         pal_txt, _, _ = mcp.call("palette", {})
         stops = []
         turns = int(acfg.get("turns_per_frame", 14))
+        # frames finished by an earlier attempt that stopped at a spending limit are kept (finding F06)
+        ckpt = FrameCheckpoint(ctx, n)
+        first = ckpt.resume(mcp)
+        if first:
+            ctx.log(f"[anim_draw] resuming at frame {first + 1} of {n}: frames 1-{first} were finished before")
         for k, fr in enumerate(spec.frames):
+            if k < first:
+                continue
             if k > 0:  # start this frame from the previous frame's finished drawing
                 mcp.call("draw", {"frame": k, "layer": "drawing",
                                   "ops": [{"op": "transform", "from_frame": k - 1, "copy": True}]})
@@ -268,13 +275,21 @@ def draw(ctx):
             live.publish(mcp, f"frame{k}", sess.turns, frame=k)  # the frame as it starts (from the previous one)
             stop, _ = sess.converse(f"frame{k}", instr, content, turns, fresh=True)
             stops.append(stop)
-            if sess.spent >= sess.max_usd:
-                break
+            if stop.startswith("stopped") or sess.spent >= sess.max_usd:
+                # a spending limit stopped this frame: keep the finished frames and stop honestly, instead of
+                # copying frames forward and presenting an incomplete animation for review
+                ckpt.save(mcp, k)
+                from ..models import BudgetExceeded
+                why = stop[len("stopped: "):] if stop.startswith("stopped") else f"the ${sess.max_usd:.2f} drawing limit for one animation was reached"
+                raise BudgetExceeded(f"stopped at frame {k + 1} of {n}: {why}. Frames 1-{k} are kept; raise the limit "
+                                     "in Settings and choose Try again to draw the rest")
+            ckpt.save(mcp, k + 1)
         mcp.call("save_project", {"path": os.path.join(agent_dir, "project")})
         doc = projectio.load_project(os.path.join(agent_dir, "project"))
         ctx.save_project("project", doc)
         ctx.info.update(usd=round(sess.spent, 4), turns=sess.turns, stops=stops)
-        _finish(ctx, doc)
+        _finish(ctx, doc, loop=spec.loop)
+        ckpt.clear()
     finally:
         if sess:
             sess.close()
@@ -282,7 +297,45 @@ def draw(ctx):
         live.clear()
 
 
-def _finish(ctx, doc):
+class FrameCheckpoint:
+    """Frames finished so far, kept per asset (not per version folder), so a rerun after a spending stop resumes
+    instead of redrawing them. Valid only for the same plan, pose sheet and traces it was made from."""
+
+    def __init__(self, ctx, n):
+        self.dir = os.path.join(ctx.asset.dir, "checkpoints", "anim_draw")
+        self.made_from = {s: (ctx.asset.state.steps[s].info or {}).get("dir") for s in ("anim_plan", "anim_poses", "anim_traces")
+                          if s in ctx.asset.state.steps}
+        self.n = n
+
+    def _meta(self):
+        try:
+            with open(os.path.join(self.dir, "checkpoint.json"), encoding="utf-8") as f:
+                return json.load(f)
+        except (OSError, ValueError):
+            return None
+
+    def resume(self, mcp):
+        """Load the saved frames into the canvas and return how many are finished (0 if none or outdated)."""
+        m = self._meta()
+        if not m or m.get("made_from") != self.made_from or m.get("frames") != self.n or not m.get("done"):
+            return 0
+        txt, _, err = mcp.call("load_project", {"path": os.path.join(self.dir, "project")})
+        if err:
+            return 0
+        mcp.call("layer", {"action": "select", "layer": "drawing"})
+        return int(m["done"])
+
+    def save(self, mcp, done):
+        os.makedirs(self.dir, exist_ok=True)
+        mcp.call("save_project", {"path": os.path.join(self.dir, "project")})
+        with open(os.path.join(self.dir, "checkpoint.json"), "w", encoding="utf-8") as f:
+            json.dump({"done": done, "frames": self.n, "made_from": self.made_from}, f)
+
+    def clear(self):
+        shutil.rmtree(self.dir, ignore_errors=True)
+
+
+def _finish(ctx, doc, loop=True):
     frames = [doc.composite(frame=f) for f in range(doc.nframes)]
     lint = ctx.art.lint_frames(doc.w, doc.h, frames)
     ctx.save_json("lint", "frames_lint.json", lint)
@@ -292,12 +345,14 @@ def _finish(ctx, doc):
     for i, d in enumerate(frames):  # one PNG per frame, for the app's frame row
         ctx.save_image(f"frame{i}", f"frame_{i:02d}.png", imaging.from_bytes(doc.w, doc.h, d))
     from gif import encode_gif
+    # one playback rule for every GIF (preview, 1x, 4x export): loop forever, or play once (finding F11)
+    loop_arg = 0 if loop else None
     data, _ = encode_gif(doc.w * 4, doc.h * 4, [imaging.to_bytes(imaging.zoom(imaging.from_bytes(doc.w, doc.h, d), 4))
-                                               for d in frames], doc.durations)
+                                               for d in frames], doc.durations, loop=loop_arg)
     with open(ctx.path("preview.gif"), "wb") as f:
         f.write(data)
     ctx.outputs["gif_x4"] = ctx.path("preview.gif")
-    data1, _ = encode_gif(doc.w, doc.h, frames, doc.durations)  # 1x: the app zooms it by whole numbers
+    data1, _ = encode_gif(doc.w, doc.h, frames, doc.durations, loop=loop_arg)  # 1x: the app zooms it by whole numbers
     with open(ctx.path("preview_1x.gif"), "wb") as f:
         f.write(data1)
     ctx.outputs["gif"] = ctx.path("preview_1x.gif")
@@ -317,7 +372,7 @@ def export(ctx):
     from gif import encode_gif
     from png import encode_png
     frames = [doc.composite(frame=f) for f in range(doc.nframes)]
-    data, _ = encode_gif(doc.w, doc.h, frames, doc.durations, loop=0 if spec.loop else 1)
+    data, _ = encode_gif(doc.w, doc.h, frames, doc.durations, loop=0 if spec.loop else None)
     with open(ctx.path(f"{name}.gif"), "wb") as f:
         f.write(data)
     ctx.outputs["gif"] = ctx.path(f"{name}.gif")

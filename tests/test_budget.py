@@ -11,15 +11,14 @@ from unittest import mock
 
 from pixelagent.agent_session import AgentSession
 from pixelagent.app import server
-from pixelagent.models import budget_problem
-from pixelagent.store import Project, month_spend_all
+from pixelagent.models import budget_problem, month_spend
+from pixelagent.store import Project
 
 
-def spend(project_dir, usd, asset="x", when=None):
-    os.makedirs(project_dir, exist_ok=True)
+def spend(project, usd, asset="x", when=None):
+    """Record spending the way the app does (the project's log and the app ledger)."""
     t = (when or datetime.datetime.now()).isoformat(timespec="seconds")
-    with open(os.path.join(project_dir, "costs.jsonl"), "a", encoding="utf-8") as f:
-        f.write(json.dumps({"time": t, "asset": asset, "usd": usd}) + "\n")
+    project.log_cost({"time": t, "asset": asset, "usd": usd})
 
 
 class BudgetTests(unittest.TestCase):
@@ -27,8 +26,12 @@ class BudgetTests(unittest.TestCase):
         self.tmp = tempfile.mkdtemp(prefix="pixelagent-budget-")
         self.settings = {**server.default_settings(), "projects_dir": self.tmp, "backend": "openai",
                          "monthly_usd": 5.0, "asset_usd": 3.0}
+        # the ledger lives next to the settings file: keep it in the temp folder, never the user's real one
+        self.patch = mock.patch.object(server, "SETTINGS_FILE", os.path.join(self.tmp, "cfg", "settings.json"))
+        self.patch.start()
 
     def tearDown(self):
+        self.patch.stop()
         shutil.rmtree(self.tmp, ignore_errors=True)
 
     def proj(self, name):
@@ -36,25 +39,51 @@ class BudgetTests(unittest.TestCase):
 
     def test_monthly_limit_counts_every_project(self):
         a, b = self.proj("A"), self.proj("B")
-        spend(a.root, 3.0)
+        spend(a, 3.0)
         self.assertIsNone(budget_problem(b))
-        spend(b.root, 2.5)                                     # 5.5 in total, though each project is under 5
+        spend(b, 2.5)                                     # 5.5 in total, though each project is under 5
         self.assertIn("monthly limit", budget_problem(a))
         self.assertIn("monthly limit", budget_problem(b))
         last_month = datetime.datetime.now().replace(day=1) - datetime.timedelta(days=2)
         c = self.proj("C")
-        spend(c.root, 50.0, when=last_month)                   # last month does not count
-        self.assertEqual(round(month_spend_all(self.tmp), 2), 5.5)
+        spend(c, 50.0, when=last_month)                   # last month does not count
+        self.assertEqual(round(month_spend(a), 2), 5.5)
+
+    def test_deleting_a_project_keeps_its_spending(self):
+        # review finding F02: the monthly total used to be summed from project folders, so deleting a project
+        # (or changing the projects folder) let new paid work through although the money was spent
+        a = self.proj("A")
+        self.proj("B")
+        spend(a, 5.5)
+        self.assertIn("monthly limit", budget_problem(self.proj("B")))
+        server.delete_project(self.settings, {"project": "A"})
+        self.assertFalse(os.path.isdir(os.path.join(self.tmp, "A")))
+        self.assertIn("monthly limit", budget_problem(self.proj("B")))
+        with self.assertRaises(ValueError):
+            server.create_character(self.settings, {"project": "B", "prompt": "a knight"})
+        moved = {**self.settings, "projects_dir": os.path.join(self.tmp, "elsewhere")}
+        os.makedirs(moved["projects_dir"])
+        self.assertIn("monthly limit", budget_problem(Project(os.path.join(moved["projects_dir"], "C"),
+                                                               server.overrides(moved))))
+
+    def test_the_ledger_starts_from_existing_spending(self):
+        # projects that spent money before the ledger existed are counted once, when the ledger is created
+        legacy = Project(os.path.join(self.tmp, "Old"))           # no ledger in its config: like a run before it
+        legacy.log_cost({"asset": "x", "usd": 4.0})
+        self.assertFalse(os.path.exists(server.ledger_path()))
+        self.assertAlmostEqual(month_spend(self.proj("New")), 4.0)
+        self.assertTrue(os.path.exists(server.ledger_path()))
+        self.assertAlmostEqual(month_spend(self.proj("New")), 4.0)  # seeded once, not on every read
 
     def test_limit_per_item(self):
         p = self.proj("A")
-        spend(p.root, 3.2, asset="hero")
+        spend(p, 3.2, asset="hero")
         self.assertIn("limit per item", budget_problem(p, "hero"))
         self.assertIsNone(budget_problem(p, "other"))
 
     def test_paid_work_is_refused_before_anything_is_created(self):
         p = self.proj("A")
-        spend(p.root, 6.0)
+        spend(p, 6.0)
         with self.assertRaises(ValueError) as cm:
             server.create_character(self.settings, {"project": "A", "prompt": "a knight"})
         self.assertIn("Nothing was started", str(cm.exception))
@@ -71,7 +100,7 @@ class BudgetTests(unittest.TestCase):
 
     def test_the_final_approval_is_never_blocked(self):
         p = self.proj("A")
-        spend(p.root, 6.0)                                     # over the monthly limit
+        spend(p, 6.0)                                     # over the monthly limit
         self.gate(p, "done-drawing", "review")                 # gate C: approving only exports (free)
         with mock.patch.object(server, "start_run") as run:
             server.decide(self.settings, {"project": "A", "id": "done-drawing", "approve": True})
@@ -85,7 +114,7 @@ class BudgetTests(unittest.TestCase):
 
     def test_drawing_loop_stops_cleanly_at_a_limit(self):
         p = self.proj("A")
-        spend(p.root, 3.5, asset="hero")
+        spend(p, 3.5, asset="hero")
         calls = []
         client = NS(responses=NS(create=lambda **kw: calls.append(kw)))
         mcp = NS(tools=lambda: [], call=lambda *a: ("", [], False))

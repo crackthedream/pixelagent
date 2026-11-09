@@ -55,7 +55,12 @@ class Ctx:
 
     # --- outputs
     def path(self, name):
-        return os.path.join(self.out, name)
+        # every output stays inside this step's version folder, whatever a name contains (review finding F04)
+        root = os.path.normpath(self.out)
+        p = os.path.normpath(os.path.join(root, name))
+        if not p.startswith(root + os.sep):
+            raise ValueError(f"output name {name!r} would leave the step's folder")
+        return p
 
     def save_json(self, key, name, obj):
         p = self.path(name)
@@ -113,6 +118,17 @@ class Pipeline:
                     self.asset.state.gates.pop(s.gate, None)
         self.asset.save()
 
+    def upstream(self, name):
+        """The exact versions (folders) of the earlier steps that a run of `name` is made from."""
+        out = {}
+        for s in self.steps:
+            if s.name == name:
+                break
+            rec = self.asset.state.steps.get(s.name)
+            if rec and rec.status in ("done", "skipped", "awaiting_gate"):
+                out[s.name] = rec.info.get("dir", "")
+        return out
+
     def versions(self, name):
         """Finished versions of a step, oldest first: [{version, dir, outputs, time, current}]."""
         s = self.step(name)
@@ -128,10 +144,11 @@ class Pipeline:
                 continue
             vdir = os.path.join(root, d)
             rel_dir = self.asset.rel(vdir)
-            outputs = None
+            outputs, upstream = None, None
             try:
                 with open(os.path.join(vdir, "outputs.json"), encoding="utf-8") as f:
-                    outputs = json.load(f)["outputs"]
+                    saved = json.load(f)
+                outputs, upstream = saved["outputs"], saved.get("upstream")
             except (OSError, ValueError, KeyError):
                 if cur_dir and rec.outputs:  # versions made before outputs.json: same file names, other folder
                     outputs = {k: v.replace(cur_dir + "/", rel_dir + "/", 1) for k, v in rec.outputs.items()
@@ -139,8 +156,13 @@ class Pipeline:
                     outputs = {k: v for k, v in outputs.items() if os.path.exists(self.asset.path(v))}
             if not outputs:
                 continue  # a run that failed or stopped before finishing
-            out.append({"version": int(m.group(1)), "dir": rel_dir, "outputs": outputs,
+            out.append({"version": int(m.group(1)), "dir": rel_dir, "outputs": outputs, "upstream": upstream,
                         "time": os.path.getmtime(vdir), "current": rel_dir == cur_dir})
+        now = self.upstream(name)
+        for v in out:
+            # usable now only if made from the same plan, concept, traces... as the current one; versions made
+            # before this was recorded (no 'upstream') are accepted only when they are the current one
+            v["compatible"] = v["current"] or (v["upstream"] is not None and v["upstream"] == now)
         return out
 
     def restore_version(self, name, version):
@@ -149,6 +171,9 @@ class Pipeline:
         v = next((x for x in self.versions(name) if x["version"] == int(version)), None)
         if v is None:
             raise ValueError(f"no finished version {version} of {name}")
+        if not v["compatible"]:
+            raise ValueError(f"version {version} was made from an earlier plan, concept or pose sheet, so it does not "
+                             "fit the current one; redo from that step instead")
         rec = self.asset.record(name)
         rec.outputs = dict(v["outputs"])
         rec.info["dir"] = v["dir"]
@@ -210,9 +235,10 @@ class Pipeline:
                 rec.outputs = {k: self.asset.rel(v) for k, v in ctx.outputs.items()}
                 rec.info, rec.error = ctx.info, ""
                 rec.info["dir"] = self.asset.rel(out)
-                try:  # each version folder remembers its outputs, so an older version can be restored later
+                try:  # each version folder remembers its outputs and what it was made from (restores, finding F05)
                     with open(os.path.join(out, "outputs.json"), "w", encoding="utf-8") as f:
-                        json.dump({"version": rec.version, "outputs": rec.outputs, "time": time.time()}, f, indent=1)
+                        json.dump({"version": rec.version, "outputs": rec.outputs, "time": time.time(),
+                                   "upstream": self.upstream(s.name)}, f, indent=1)
                 except OSError:
                     pass
                 if ctx.skipped:

@@ -164,6 +164,74 @@ class AnimationTests(unittest.TestCase):
         self.assertTrue(magenta(2, 1) and magenta(2, 2) and magenta(2, 3))
         self.assertFalse(magenta(0, 2))
 
+    def test_a_limit_stops_the_frames_honestly_and_resumes(self):
+        # review finding F06: a spending stop used to copy frames forward and still reach the review as complete
+        n = 3
+
+        def sheet_b64():
+            fig, _ = synth.draw_character(2, size=300)
+            fig = fig.crop(imaging.content_bbox(fig))
+            s = Image.new("RGB", (900, 400), (222, 222, 226))
+            for i in range(n):
+                s.paste(fig.convert("RGB"), (40 + i * 300, 380 - fig.height), fig)
+            buf = io.BytesIO()
+            s.save(buf, "PNG")
+            return base64.b64encode(buf.getvalue()).decode()
+
+        firsts = []
+        state = {"spend_at_frame": 1}
+
+        def create(**kw):
+            frame = int(kw["instructions"].split("frame ")[1].split(" of")[0]) - 1
+            if "previous_response_id" not in kw:
+                firsts.append(frame)
+                if frame == state["spend_at_frame"]:  # this frame's first call uses up the per-item limit
+                    self.proj.log_cost({"asset": "hero-sprint", "kind": "llm", "role": "x", "model": "x", "usd": 50})
+                out = [NS(type="function_call", name="draw", call_id=f"d{frame}", arguments=json.dumps(
+                    {"frame": frame, "ops": [{"op": "pixels", "points": [[1 + frame, 1]], "color": "#ff00ff"}]}))]
+            else:
+                out = [NS(type="function_call", name="finish", call_id=f"f{frame}", arguments='{"summary": "ok"}')]
+            return NS(id=f"r{len(firsts)}-{frame}", output=out, usage=NS(input_tokens=100, output_tokens=10,
+                                                                          input_tokens_details=NS(cached_tokens=0)))
+
+        def parse(**kw):
+            out = AnimationSpec(name="sprint", summary="sprint", loop=False,
+                                frames=[FramePlan(index=i, pose=f"p{i}", duration_ms=100) for i in range(n)])
+            return NS(output_parsed=out, usage=NS(input_tokens=10, output_tokens=10))
+
+        def edit(**kw):
+            return NS(data=[NS(b64_json=sheet_b64())], usage=NS(input_tokens=10, output_tokens=10,
+                                                                 input_tokens_details=NS(image_tokens=0, text_tokens=10)))
+
+        client = NS(responses=NS(create=create, parse=parse), images=NS(edit=edit, generate=edit))
+        self.proj.new_asset("hero-sprint", {"kind": "animation", "character": "hero", "anim": "sprint", "prompt": "sprint"})
+        self.proj.config["backend"]["mode"] = "openai"
+        os.environ.setdefault("OPENAI_API_KEY", "sk-test-not-used")
+        from pixelagent.models import BudgetExceeded
+        with self.assertRaises(BudgetExceeded) as cm:
+            Pipeline(self.proj, "hero-sprint", mode="openai", client=client).run(auto_approve=True, log=quiet)
+        self.assertIn("frame 2 of 3", str(cm.exception))
+        a = self.proj.asset("hero-sprint")
+        self.assertEqual(a.state.steps["anim_draw"].status, "failed")
+        review = a.state.steps.get("anim_review")
+        self.assertTrue(review is None or review.status != "awaiting_gate")           # never offered for review
+        # raise the limit and try again: frame 1 is kept, drawing resumes at frame 2
+        self.proj.config["budget"]["max_usd_per_asset"] = 1000.0
+        state["spend_at_frame"] = None
+        firsts.clear()
+        self.assertEqual(Pipeline(self.proj, "hero-sprint", mode="openai", client=client).run(auto_approve=True, log=quiet),
+                         "complete")
+        self.assertEqual(firsts, [1, 2])                           # frame 1 was not drawn again
+        a = self.proj.asset("hero-sprint")
+        self.assertFalse(os.path.exists(os.path.join(a.dir, "checkpoints", "anim_draw")))
+        # review finding F11: a non-looping animation plays once in every GIF (no NETSCAPE loop block)
+        for key in ("gif", "gif_x4"):
+            with open(a.output("anim_export", key), "rb") as f:
+                self.assertNotIn(b"NETSCAPE2.0", f.read(), key)
+        with open(a.output("anim_draw", "gif"), "rb") as f:
+            self.assertNotIn(b"NETSCAPE2.0", f.read())
+        self.assertFalse(json.loads(rd(a.output("anim_export", "meta")))["loop"])
+
 
 if __name__ == "__main__":
     unittest.main()

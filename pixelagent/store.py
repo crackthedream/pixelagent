@@ -37,6 +37,51 @@ def _retry_locked(fn, tries=40, wait=0.025):
             time.sleep(wait)
 
 
+ID_RE = re.compile(r"[A-Za-z0-9_\-]{1,120}")
+_LEDGER_LOCK = threading.Lock()
+
+
+def ledger_append(ledger, entry):
+    """The app's spending ledger: one line per paid call, kept outside every project folder, so deleting or moving
+    projects never removes spending from the monthly limit (review finding F02)."""
+    os.makedirs(os.path.dirname(os.path.abspath(ledger)), exist_ok=True)
+    with _LEDGER_LOCK, open(ledger, "a", encoding="utf-8") as f:
+        f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
+
+def ledger_month_spend(ledger, seed_dir=None):
+    """USD recorded in the ledger this calendar month. A missing ledger is first seeded from the cost logs of the
+    projects in seed_dir (spending made before the ledger existed)."""
+    with _LEDGER_LOCK:
+        if not os.path.exists(ledger):
+            os.makedirs(os.path.dirname(os.path.abspath(ledger)), exist_ok=True)
+            with open(ledger, "w", encoding="utf-8") as out:
+                out.write(json.dumps({"seeded_from": seed_dir, "time": datetime.datetime.now().isoformat(timespec="seconds"),
+                                      "usd": 0}) + "\n")
+                for name in (sorted(os.listdir(seed_dir)) if seed_dir and os.path.isdir(seed_dir) else []):
+                    p = os.path.join(seed_dir, name, "costs.jsonl")
+                    if not os.path.isfile(p):
+                        continue
+                    with open(p, encoding="utf-8") as f:
+                        for line in f:
+                            try:
+                                e = json.loads(line)
+                            except ValueError:
+                                continue
+                            out.write(json.dumps({**e, "project": name}, ensure_ascii=False) + "\n")
+        prefix = datetime.date.today().strftime("%Y-%m")
+        total = 0.0
+        with open(ledger, encoding="utf-8") as f:
+            for line in f:
+                try:
+                    e = json.loads(line)
+                except ValueError:
+                    continue
+                if str(e.get("time", "")).startswith(prefix):
+                    total += float(e.get("usd", 0) or 0)
+        return total
+
+
 def month_spend_all(projects_dir):
     """USD logged this calendar month by every project folder in projects_dir."""
     total = 0.0
@@ -71,10 +116,14 @@ class Project:
         return sorted(n for n in os.listdir(d) if os.path.exists(os.path.join(d, n, "state.json")))
 
     def asset(self, asset_id):
+        # every lookup starts here: an id is one plain folder name, so '../../B/assets/hero' or an absolute path
+        # can never reach another project's files (review finding F03)
+        if not isinstance(asset_id, str) or not ID_RE.fullmatch(asset_id):
+            raise ValueError("invalid item id")
         return Asset(self, asset_id)
 
     def new_asset(self, asset_id, inputs):
-        if not re.fullmatch(r"[A-Za-z0-9_\-]+", asset_id):
+        if not ID_RE.fullmatch(asset_id):
             raise ValueError("asset id may only contain letters, digits, '-' and '_'")
         a = Asset(self, asset_id, create=True)
         if os.path.exists(a.state_path):
@@ -99,6 +148,9 @@ class Project:
         entry = {"time": datetime.datetime.now().isoformat(timespec="seconds"), **entry}
         with self._cost_lock, open(os.path.join(self.root, "costs.jsonl"), "a", encoding="utf-8") as f:
             f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        ledger = self.config.get("budget", {}).get("ledger")
+        if ledger:  # the app's ledger survives deleting this project
+            ledger_append(ledger, {**entry, "project": os.path.basename(self.root)})
 
     def cost_total(self, asset_id=None, month=False):
         """USD spent (estimated) in this project; filter by asset and/or the current calendar month."""
@@ -158,10 +210,17 @@ class Asset:
         return self.state.steps[step]
 
     def new_version_dir(self, index, step):
+        """A new, never-used folder for a run of a step, reserved in state.json before anything is written into it.
+        A folder left by an interrupted run (on disk, not recorded) is skipped, never overwritten (finding F09)."""
         rec = self.record(step)
-        rec.version += 1
-        d = os.path.join(self.dir, "steps", f"{index:02d}_{step}", f"v{rec.version:03d}")
-        os.makedirs(d, exist_ok=True)
+        base = os.path.join(self.dir, "steps", f"{index:02d}_{step}")
+        v = rec.version + 1
+        while os.path.exists(os.path.join(base, f"v{v:03d}")):
+            v += 1
+        rec.version = v
+        d = os.path.join(base, f"v{v:03d}")
+        os.makedirs(d)
+        self.save()
         return d
 
     def output(self, step, key):

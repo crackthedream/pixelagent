@@ -19,7 +19,11 @@ class BudgetExceeded(RuntimeError):
 def month_spend(project):
     """This month's spend that counts against the monthly limit: all projects in the app's projects folder when
     [budget] monthly_scope_dir is set (the app sets it), else this project only (command line)."""
-    scope = project.config["budget"].get("monthly_scope_dir")
+    b = project.config["budget"]
+    if b.get("ledger"):  # the app: one ledger for all projects, independent of their folders
+        from .store import ledger_month_spend
+        return ledger_month_spend(b["ledger"], seed_dir=b.get("monthly_scope_dir"))
+    scope = b.get("monthly_scope_dir")
     if scope:
         from .store import month_spend_all
         return month_spend_all(scope)
@@ -58,8 +62,8 @@ class _Base:
 
 
 class StubLLM(_Base):
+    # stand-in models are free: paid spending limits do not apply to them (review finding F10)
     def structured(self, role, instructions, text, images, schema, stub):
-        self.check_budget()
         t = time.perf_counter()
         result = stub()
         if not isinstance(result, schema):
@@ -70,7 +74,6 @@ class StubLLM(_Base):
 
 class StubImages(_Base):
     def generate(self, role, prompt, n, out_dir, refs=None, stub=None, quality=None):
-        self.check_budget()
         os.makedirs(out_dir, exist_ok=True)
         paths = stub(n, out_dir) if stub else []
         if not paths and refs:

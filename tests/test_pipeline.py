@@ -209,12 +209,14 @@ class PipelineTests(Base):
             spec = json.loads(rd(self.proj.asset(aid).output("intake", "spec")))
             self.assertEqual(spec["height_px"], want)
 
-    def test_budget_cap(self):
+    def test_test_runs_ignore_paid_limits(self):
+        # review finding F10: the free stand-in models used to fail at their first step once paid limits were
+        # used up. Paid limits are enforced by the OpenAI backend (test_openai_backend) and the app's checks.
         self.proj.new_asset("hero", {"references": [self.ref]})
         self.proj.log_cost({"asset": "hero", "kind": "llm", "role": "x", "model": "x", "usd": 99})
-        with self.assertRaises(BudgetExceeded):
-            Pipeline(self.proj, "hero").run(auto_approve=True, log=quiet)
-        self.assertEqual(self.proj.asset("hero").state.steps["intake"].status, "failed")
+        Pipeline(self.proj, "hero").run(auto_approve=True, log=quiet)
+        self.assertEqual(self.proj.asset("hero").state.status, "complete")
+        self.assertIsNotNone(BudgetExceeded)
 
 
 

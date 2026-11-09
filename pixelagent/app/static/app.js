@@ -103,6 +103,9 @@ function renderSidebar() {
     <div class="side-row"><button class="side-item project-item ${p === o.current ? "current active" : ""}" data-project="${esc(p)}">
       ${icon("folder")}<span>${esc(p)}</span></button>
       <button class="side-more" data-project-more="${esc(p)}" aria-label="Actions for ${esc(p)}">${icon("more")}</button></div>`).join("");
+  const dc = $("#count-deleted");
+  dc.hidden = !o.trash_count;
+  dc.textContent = o.trash_count || "";
   const cap = Number(o.settings.monthly_usd) || 1;
   const pct = Math.min(100, (o.month_spent / cap) * 100);
   $("#spend-text").textContent = `$${o.month_spent.toFixed(2)} of $${cap.toFixed(0)}`;
@@ -150,6 +153,7 @@ async function render(fromRefresh) {
   renderSidebar();
   if (!state.overview) return;
   if (r.view === "settings") return renderSettings();
+  if (r.view === "deleted") return renderDeleted();
   if (!project()) return renderNoProject();
   if (r.view === "item" && r.id) return renderDetail(r.id, fromRefresh);
   if (!fromRefresh) await loadItems();
@@ -305,9 +309,10 @@ async function renderDetail(id, fromRefresh) {
               ? "Frames appear here once the poses are approved." : "The sprite appears here once it has been drawn."}</span></div>`}
           ${d.live ? `<span class="live-badge"><span class="live-dot"></span>${esc(liveText(d.live))}</span>` : ""}
           ${d.running ? `<span class="working"><span class="spinner"></span>${esc(currentStep(d))}</span>` : ""}
-          ${viewing ? `<div class="version-bar"><span>Version ${viewing.version}</span><div class="spacer"></div>
+          ${viewing ? `<div class="version-bar"><span>Version ${viewing.version}</span>
+              ${viewing.compatible ? "" : `<span class="muted vb-note">Made from an earlier plan or concept</span>`}<div class="spacer"></div>
               <button class="btn" id="vb-back">Show current</button>
-              <button class="btn primary" id="vb-use">Use this version</button></div>` : ""}
+              ${viewing.compatible ? `<button class="btn primary" id="vb-use">Use this version</button>` : ""}</div>` : ""}
         </div>
         ${decisionPanel(d)}
       </section>
@@ -348,9 +353,10 @@ function inspector(d) {
   const vers = (d.versions && d.versions.items) || [];
   if (vers.length > 1) {
     html += `<div class="card"><h2>Versions</h2><div class="versions">${vers.map((v) => `
-      <button class="version ${v.current ? "current" : ""} ${state.viewVersion === v.version ? "viewing" : ""}" data-version="${v.version}"
+      <button class="version ${v.current ? "current" : ""} ${v.compatible ? "" : "old"} ${state.viewVersion === v.version ? "viewing" : ""}" data-version="${v.version}"
         aria-label="Version ${v.version}${v.current ? ", current" : ""}"><span class="stage">${stageImg(v.url, "Version " + v.version)}</span>
-        <span class="cap">${v.version}${v.current ? ` <span class="tag">Current</span>` : ""}</span></button>`).join("")}</div></div>`;
+        <span class="cap">${v.version}${v.current ? ` <span class="tag">Current</span>` : ""}</span></button>`).join("")}</div>
+      ${vers.some((v) => !v.compatible) ? `<p class="muted small">Dimmed versions were made from an earlier plan or concept. You can look at them, but not use them now.</p>` : ""}</div>`;
   }
   if (d.exports) {
     html += `<div class="card"><h2>Exports</h2><div class="list">${d.exports.filter((e) => e.url).map((e) => `
@@ -862,11 +868,11 @@ function alertDeleteItem(it) {
   const extra = anims.length ? ` Its ${anims.length === 1 ? "animation" : anims.length + " animations"} will be deleted too.` : "";
   showAlert({
     title: `Delete “${it.name}”?`,
-    text: `It moves to the Recycle Bin with all its versions and exports, so you can restore it from there.${extra}`,
+    text: `It moves to Recently Deleted with all its versions and exports, where you can restore it.${extra}`,
     confirm: "Delete", danger: true,
     onConfirm: async () => {
       const r = await act(() => api("/api/item/delete", { project: project(), id: it.id, with_animations: anims.length > 0 }),
-        "Moved to the Recycle Bin");
+        "Moved to Recently Deleted");
       if (r && route().view === "item") location.hash = `#/${it.kind === "animation" ? "animations" : "characters"}`;
     },
   });
@@ -875,11 +881,73 @@ function alertDeleteItem(it) {
 function alertDeleteProject(pid) {
   showAlert({
     title: `Delete the project “${pid}”?`,
-    text: "Every character and animation in it moves to the Recycle Bin, so you can restore the folder from there.",
+    text: "The project and everything in it move to Recently Deleted, where you can restore them.",
     confirm: "Delete project", danger: true,
     onConfirm: async () => {
-      const r = await act(() => api("/api/project/delete", { project: pid }), "Moved to the Recycle Bin");
+      const r = await act(() => api("/api/project/delete", { project: pid }), "Moved to Recently Deleted");
       if (r) location.hash = "#/characters";
     },
+  });
+}
+
+
+// ------------------------------------------------------------------ Recently Deleted
+
+function deletedWhen(t) {
+  const days = Math.floor((Date.now() / 1000 - t) / 86400);
+  if (days <= 0) return "Deleted today";
+  if (days === 1) return "Deleted yesterday";
+  return `Deleted ${days} days ago`;
+}
+
+function deletedLabel(e) {
+  if (e.kind === "project") return `Project, ${e.items || 0} item${e.items === 1 ? "" : "s"}`;
+  const what = e.item_kind === "animation" ? `Animation${e.character_name ? ` of ${e.character_name}` : ""}` : "Character";
+  const anims = e.animations ? ` and ${e.animations} animation${e.animations === 1 ? "" : "s"}` : "";
+  return `${what}${anims}, in ${e.project}`;
+}
+
+async function renderDeleted() {
+  sessionStorage.setItem("from", "deleted");
+  const items = (await api("/api/trash")).items;
+  setToolbar(`<div class="title">Recently Deleted</div><div class="spacer"></div>
+    ${items.length ? `<button class="btn" id="btn-empty">${icon("trash")}Delete All</button>` : ""}`);
+  schedulePoll(0);
+  const c = $("#content");
+  if (!items.length) {
+    c.innerHTML = emptyState("trash", "Nothing here", "Characters, animations and projects you delete wait here until you restore them or delete them for good.", "");
+    return;
+  }
+  c.innerHTML = `<div class="page-head"><div><h1>Recently Deleted</h1>
+      <div class="sub">Deleted work stays here, untouched, until you restore it or delete it for good.</div></div></div>
+    <div class="grid">${items.map((e) => `
+      <div class="tile deleted" data-entry="${esc(e.entry)}">
+        <div class="stage ${e.thumb ? "" : "empty"}">${stageImg(e.thumb, e.name)}
+          ${e.kind === "project" ? `<span class="kind-badge">${icon("folder")}Project</span>` : ""}</div>
+        <div class="tile-name">${esc(e.name || "Untitled")}</div>
+        <div class="tile-status">${esc(deletedLabel(e))}</div>
+        <div class="tile-status">${esc(deletedWhen(e.deleted_at))}</div>
+        <div class="tile-actions"><button class="btn" data-restore="${esc(e.entry)}">Restore</button>
+          <button class="btn plain danger" data-purge="${esc(e.entry)}">Delete Now</button></div>
+      </div>`).join("")}</div>`;
+  c.querySelectorAll("[data-restore]").forEach((b) => b.onclick = async () => {
+    const r = await act(() => api("/api/trash/restore", { entry: b.dataset.restore }), "Restored");
+    if (r) render();
+  });
+  c.querySelectorAll("[data-purge]").forEach((b) => b.onclick = () => {
+    const e = items.find((x) => x.entry === b.dataset.purge);
+    showAlert({
+      title: `Delete “${e.name || "Untitled"}” now?`,
+      text: "It will be removed from your computer for good. This can't be undone.",
+      confirm: "Delete Now", danger: true,
+      onConfirm: async () => { await act(() => api("/api/trash/delete", { entry: e.entry }), "Deleted"); render(); },
+    });
+  });
+  const eb = $("#btn-empty");
+  if (eb) eb.onclick = () => showAlert({
+    title: `Delete all ${items.length} item${items.length === 1 ? "" : "s"} for good?`,
+    text: "Everything in Recently Deleted will be removed from your computer. This can't be undone.",
+    confirm: "Delete All", danger: true,
+    onConfirm: async () => { await act(() => api("/api/trash/empty", {}), "Everything in Recently Deleted was deleted"); render(); },
   });
 }

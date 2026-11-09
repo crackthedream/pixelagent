@@ -45,9 +45,15 @@ class AgentSession:
         return (usage.input_tokens * p.get("input", 0) + usage.output_tokens * p.get("output", 0)) / 1e6
 
     def save_imgs(self, imgs, tag):
+        """One file per image. The name carries a per-session sequence number: two calls of the same tool in one
+        round (e.g. two `view`s) used to share 't012_view0.png', so the model saw the second image twice."""
         paths = []
         for k, png in enumerate(imgs):
-            p = os.path.join(self.out, f"t{self.turns:03d}_{tag}{k}.png")
+            while True:
+                self._img_seq = getattr(self, "_img_seq", 0) + 1
+                p = os.path.join(self.out, f"t{self.turns:03d}_{self._img_seq:04d}_{tag}{k}.png")
+                if not os.path.exists(p):
+                    break
             with open(p, "wb") as f:
                 f.write(png)
             paths.append(p)
@@ -57,6 +63,29 @@ class AgentSession:
     def image_item(path):
         return {"type": "input_image", "image_url": image_data_url(path, 1024), "detail": "high"}
 
+    def _reference_layers(self):
+        """Names and indices of the canvas's reference (tracing) layers, read from the engine."""
+        txt, _, _ = self.mcp.call("canvas", {"action": "info"})
+        refs, n = set(), 0
+        for line in txt.splitlines():
+            line = line.strip().lstrip("*")
+            if not line.startswith("#"):
+                continue
+            n += 1
+            idx, _, rest = line[1:].partition(" ")
+            name = rest.split(" (")[0]
+            if "reference" in rest.partition(" (")[2] or name == "reference":
+                refs.update({name, idx})
+        return refs, n
+
+    def _is_ref(self, ref, refs, n):
+        if ref is None:
+            return False
+        s = str(ref).strip()
+        if s.lstrip("-").isdigit() and int(s) < 0:
+            s = str(int(s) + n)  # -1 = last layer, as the engine reads it
+        return s in refs
+
     def guard(self, name, args):
         """Return an error text if a call must be refused, else None."""
         if name not in self.allowed:
@@ -65,6 +94,16 @@ class AgentSession:
             # the tracing layer must stay a reference: turning it (or merging into it) into real pixels would
             # export the converted trace instead of the model's own drawing
             return "error: changing the reference flag and merge_down are disabled here; draw on your own layers"
+        if name == "draw":
+            # the final pixels must be the model's own: no copying from the tracing layer, no drawing on it (F08)
+            ops = args.get("ops") if isinstance(args.get("ops"), list) else []
+            if any(isinstance(o, dict) and o.get("from_layer") is not None for o in ops) or args.get("layer") is not None:
+                refs, n = self._reference_layers()
+                if self._is_ref(args.get("layer"), refs, n):
+                    return "error: the reference layer is a guide only; draw on your own layers"
+                if any(isinstance(o, dict) and self._is_ref(o.get("from_layer"), refs, n) for o in ops):
+                    return ("error: copying pixels from the reference layer is not allowed; read it with `view` "
+                            "mode 'grid' and draw the pixels yourself")
         return None
 
     def converse(self, phase, instructions, content, limit, fresh=False):

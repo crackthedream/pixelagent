@@ -131,6 +131,19 @@ class ArtistLoopTests(unittest.TestCase):
         self.assertEqual(tuple(png[(10 * w + 14) * 4:(10 * w + 14) * 4 + 3]), (0x10, 0x10, 0x18))   # eye drawn
         self.assertEqual(tuple(png[(20 * w + 12) * 4:(20 * w + 12) * 4 + 3]), (0xe0, 0xb0, 0x90))  # body kept
 
+    def test_two_views_in_one_round_reach_the_model_as_two_images(self):
+        # review finding F07: both images used to be saved as t001_view0.png, so the model saw the second one twice
+        script = [[call("draw", {"ops": [{"op": "rect", "x": 2, "y": 2, "w": 6, "h": 6, "color": "#ff0000", "fill": True}]}, "d")],
+                  [call("view", {"mode": "image", "x": 0, "y": 0, "width": 10, "height": 10, "scale": 4}, "v1"),
+                   call("view", {"mode": "image", "x": 20, "y": 30, "width": 10, "height": 10, "scale": 4}, "v2")],
+                  [call("finish", {"summary": "ok"}, "f")]]
+        fake = NS(responses=FakeResponses(script))
+        run_artist(self.proj, "views", self.ref, height=48, client=fake, max_turns=5, log=lambda *_: None)
+        req = fake.responses.requests[2]  # the request that carries the two view results
+        imgs = [c["image_url"] for i in req["input"] if i.get("role") == "user" for c in i["content"] if c["type"] == "input_image"]
+        self.assertEqual(len(imgs), 2)
+        self.assertNotEqual(imgs[0], imgs[1])
+
     def test_face_pass_after_drawing_is_a_fresh_conversation(self):
         # draw then face in one run: the face pass must not carry the drawing conversation (every call would re-send
         # all earlier rounds and their images; measured $0.51 vs $0.05-0.08 for the same pass)

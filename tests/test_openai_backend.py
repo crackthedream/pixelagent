@@ -275,6 +275,43 @@ class OpenAIBackendTests(unittest.TestCase):
         costs = [json.loads(l) for l in rd(os.path.join(self.root, "costs.jsonl")).splitlines()]
         self.assertTrue(any(c["role"] == "artist" for c in costs))
 
+    def test_artist_stopped_by_a_limit_stops_honestly_and_continues_later(self):
+        # review finding F06 (characters): a half-drawn sprite used to go on to critique and approval as finished
+        self.proj.config["finish"] = {"mode": "artist", "max_usd": 1.5, "max_turns": 5, "face_turns": 3, "face_pass": False}
+        mode = {"first": True}
+        calls = []
+
+        def create(**kw):
+            calls.append(kw)
+            if mode["first"]:
+                # the first round draws, then the per-item limit is used up (as if this call had been costly)
+                self.proj.log_cost({"asset": "hero", "kind": "llm", "role": "x", "model": "x", "usd": 10})
+                out = [NS(type="function_call", name="draw", call_id=f"a{len(calls)}", arguments=json.dumps(
+                    {"ops": [{"op": "rect", "x": 6, "y": 6, "w": 12, "h": 30, "color": "#3050a0", "fill": True}]}))]
+            else:
+                out = [NS(type="function_call", name="finish", call_id=f"f{len(calls)}", arguments='{"summary": "done"}')]
+            return NS(id=f"r{len(calls)}", output=out, usage=NS(input_tokens=500, output_tokens=50,
+                                                                input_tokens_details=NS(cached_tokens=0)))
+        self.client.responses.create = create
+        self.proj.new_asset("hero", {"prompt": "hero"})
+        from pixelagent.models import BudgetExceeded as BE
+        with self.assertRaises(BE) as cm:
+            Pipeline(self.proj, "hero", client=self.client).run(auto_approve=True, log=quiet)
+        self.assertIn("raise the limit", str(cm.exception))
+        a = self.proj.asset("hero")
+        self.assertEqual(a.state.steps["artist"].status, "failed")
+        self.assertNotEqual(a.state.steps.get("review") and a.state.steps["review"].status, "awaiting_gate")
+        self.assertTrue(os.path.exists(os.path.join(a.dir, "checkpoints", "artist", "project")))
+        # raise the limit, try again: the drawing continues from where it stopped
+        self.proj.config["budget"]["max_usd_per_asset"] = 100.0
+        mode["first"] = False
+        n_before = len(calls)
+        self.assertEqual(Pipeline(self.proj, "hero", client=self.client).run(auto_approve=True, log=quiet), "complete")
+        self.assertEqual(len(calls) - n_before, 1)                 # only the finishing round was needed
+        d = imaging.to_bytes(imaging.load_rgba(self.proj.asset("hero").output("export", "png")))
+        self.assertIn((0x30, 0x50, 0xa0), {tuple(d[i:i + 3]) for i in range(0, len(d), 4) if d[i + 3]})
+        self.assertFalse(os.path.exists(os.path.join(a.dir, "checkpoints", "artist")))
+
     def test_unusable_map_falls_back_to_clusters(self):
         self.client.images.bad_map = True
         self.assertEqual(self._run("hero", {"prompt": "hero"}), "complete")

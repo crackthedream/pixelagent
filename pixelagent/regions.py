@@ -4,6 +4,7 @@ A model sees one small region (text grid + zoomed images + the matching concept 
 as rows of palette characters. Several candidates are generated; a picker chooses among them with the
 unchanged original always offered as #0, so 'no change' is a valid outcome. Edits can only touch the region
 and can only use palette colours."""
+from .names import safe_filename
 import json
 
 import numpy as np
@@ -161,18 +162,19 @@ def rewrite_region(ctx, data, w, h, palette, region, name, goal, concept=None, g
     concept reference `ref` (sprite-grid rendering of the concept), let a picker choose (or keep #0 = current).
     Returns (new data, info dict). Candidate images go to ctx.out."""
     art = ctx.art
+    fname = safe_filename(name, "region")  # region names come from the model: never trust them as file names
     rgb_of, char_of, legend_txt = legend(palette)
     x, y, rw, rh = region
     sprite = imaging.from_bytes(w, h, data)
-    ctx_img = ctx.path(f"{tag}_{name}_context.png")
+    ctx_img = ctx.path(f"{tag}_{fname}_context.png")
     grid_image(sprite, 6, 8, region).save(ctx_img)
-    reg_img = ctx.path(f"{tag}_{name}_region.png")
+    reg_img = ctx.path(f"{tag}_{fname}_region.png")
     grid_image(sprite.crop((x, y, x + rw, y + rh)), 16, 64, None, label=False).save(reg_img)
     images = [ctx_img, reg_img]
     if concept is not None and geom is not None:
         cc = concept_crop(concept, geom, region)
         if cc is not None:
-            cp = ctx.path(f"{tag}_{name}_concept.png")
+            cp = ctx.path(f"{tag}_{fname}_concept.png")
             cc.save(cp)
             images.append(cp)
     grid_txt = region_grid(data, w, h, region, char_of)
@@ -233,7 +235,7 @@ def rewrite_region(ctx, data, w, h, palette, region, name, goal, concept=None, g
     if len(cands) == 1:
         info["picked"] = 0
         return bytearray(data), info
-    sheet_path = ctx.path(f"{tag}_{name}_candidates.png")
+    sheet_path = ctx.path(f"{tag}_{fname}_candidates.png")
     candidates_sheet(w, h, cands, region).save(sheet_path)
     pal = [v[:3] for v in palette.values() if v[3] > 0]
     scores = [art.lint(w, h, bytearray(c), pal)["score"] for c in cands]
