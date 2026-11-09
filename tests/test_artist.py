@@ -131,6 +131,25 @@ class ArtistLoopTests(unittest.TestCase):
         self.assertEqual(tuple(png[(10 * w + 14) * 4:(10 * w + 14) * 4 + 3]), (0x10, 0x10, 0x18))   # eye drawn
         self.assertEqual(tuple(png[(20 * w + 12) * 4:(20 * w + 12) * 4 + 3]), (0xe0, 0xb0, 0x90))  # body kept
 
+    def test_face_pass_after_drawing_is_a_fresh_conversation(self):
+        # draw then face in one run: the face pass must not carry the drawing conversation (every call would re-send
+        # all earlier rounds and their images; measured $0.51 vs $0.05-0.08 for the same pass)
+        script = [[call("draw", {"ops": [{"op": "rect", "x": 8, "y": 6, "w": 16, "h": 30, "color": "#e0b090", "fill": True}]}, "d1")],
+                  [call("finish", {"summary": "body"}, "d2")],
+                  [call("draw", {"ops": [{"op": "pixel", "x": 14, "y": 10, "color": "#101018"}]}, "f1")],
+                  [call("finish", {"summary": "eyes"}, "f2")]]
+        fake = NS(responses=FakeResponses(script))
+        s = run_artist(self.proj, "fr", self.ref, height=40, client=fake, max_turns=5, log=lambda *_: None,
+                       phases=("draw", "face"), face=(11, 7, 10, 8))
+        self.assertEqual(s["stop"], "draw: finished; face: finished")
+        reqs = fake.responses.requests
+        self.assertEqual(reqs[1]["previous_response_id"], "resp_0")          # drawing rounds chain together
+        face_first = reqs[2]
+        self.assertIn("FACE PASS", face_first["instructions"])
+        self.assertNotIn("previous_response_id", face_first)                 # ...the face pass starts fresh
+        self.assertFalse(any(i.get("type") == "function_call_output" for i in face_first["input"]))
+        self.assertEqual(reqs[3]["previous_response_id"], "resp_2")          # and chains within itself
+
     def test_face_region_picks_head_skin_not_hands(self):
         w, h = 20, 40
         labels = [None] * (w * h)

@@ -22,10 +22,11 @@ def _schema(tool):
 
 class AgentSession:
     def __init__(self, project, asset_id, mcp, client, model, out_dir, effort="medium", allowed=DEFAULT_TOOLS,
-                 max_usd=3.0, log=print, transcript_name="transcript.jsonl"):
+                 max_usd=3.0, log=print, transcript_name="transcript.jsonl", on_round=None):
         self.project, self.asset_id, self.mcp, self.client = project, asset_id, mcp, client
         self.model, self.out, self.effort, self.allowed = model, out_dir, effort, tuple(allowed)
         self.max_usd, self.log = max_usd, log
+        self.on_round = on_round  # called as on_round(session, phase) after each round of tool calls (live preview)
         self.spent, self.turns, self.prev, self.pending = 0.0, 0, None, []
         self.transcript = open(os.path.join(out_dir, transcript_name), "a", encoding="utf-8")
         self.tools = [{"type": "function", "name": t["name"], "description": t["description"][:1024],
@@ -75,7 +76,12 @@ class AgentSession:
         items = list(self.pending) + [{"role": "user", "content": content}]
         self.pending = []
         n, finished = 0, None
+        from .models import budget_problem
         while n < limit:
+            problem = budget_problem(self.project, self.asset_id)
+            if problem:  # stop cleanly: the drawing so far is kept and exported by the caller
+                self.pending = items if n else []
+                return f"stopped: {problem}", None
             n += 1
             self.turns += 1
             kwargs = dict(model=self.model, instructions=instructions, input=items, tools=self.tools,
@@ -129,6 +135,11 @@ class AgentSession:
                               [self.image_item(p) for p in images]})
             self.log(f"[artist {self.asset_id} {phase}] turn {self.turns}: {', '.join(c.name for c in calls)}  "
                      f"(${self.spent:.3f})")
+            if self.on_round and any(c.name in ("draw", "undo", "redo", "layer") for c in calls):
+                try:
+                    self.on_round(self, phase)
+                except Exception:
+                    pass
             if finished is not None:
                 self.pending = items  # outputs for the last calls go with the next message of this conversation
                 return "finished", finished

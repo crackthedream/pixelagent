@@ -16,6 +16,28 @@ class BudgetExceeded(RuntimeError):
     pass
 
 
+def month_spend(project):
+    """This month's spend that counts against the monthly limit: all projects in the app's projects folder when
+    [budget] monthly_scope_dir is set (the app sets it), else this project only (command line)."""
+    scope = project.config["budget"].get("monthly_scope_dir")
+    if scope:
+        from .store import month_spend_all
+        return month_spend_all(scope)
+    return project.cost_total(month=True)
+
+
+def budget_problem(project, asset_id=None):
+    """A sentence saying why spending must stop now, or None."""
+    b = project.config["budget"]
+    cap = float(b.get("max_usd_per_asset", 0) or 0)
+    if cap and asset_id and project.cost_total(asset_id) >= cap:
+        return f"this item has used its ${cap:.2f} limit (Settings: limit per item)"
+    month_cap = float(b.get("monthly_usd", 0) or 0)
+    if month_cap and month_spend(project) >= month_cap:
+        return f"this month's ${month_cap:.2f} limit is used up (Settings: monthly limit)"
+    return None
+
+
 class _Base:
     def __init__(self, project, asset_id=None):
         self.project = project
@@ -30,12 +52,9 @@ class _Base:
                                "model": extra.pop("model", self.model_for(role)), "usd": usd, **extra})
 
     def check_budget(self):
-        cap = float(self.cfg["budget"].get("max_usd_per_asset", 0) or 0)
-        if cap and self.asset_id and self.project.cost_total(self.asset_id) >= cap:
-            raise BudgetExceeded(f"asset '{self.asset_id}' reached its ${cap:.2f} budget")
-        month_cap = float(self.cfg["budget"].get("monthly_usd", 0) or 0)
-        if month_cap and self.project.cost_total(month=True) >= month_cap:
-            raise BudgetExceeded(f"this month's spend in this project reached the ${month_cap:.2f} cap ([budget] monthly_usd)")
+        problem = budget_problem(self.project, self.asset_id)
+        if problem:
+            raise BudgetExceeded(problem)
 
 
 class StubLLM(_Base):

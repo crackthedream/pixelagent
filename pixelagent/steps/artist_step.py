@@ -7,6 +7,7 @@ critiqued and exported. [finish] mode = "repair" keeps the older detail/repair p
 import json
 import os
 
+from ..live import LivePreview
 from .. import imaging, regions
 
 
@@ -50,7 +51,8 @@ def run(ctx):
                    out_dir=ctx.path("agent"), max_usd=float(fcfg.get("max_usd", 1.5)),
                    max_turns=int(fcfg.get("max_turns", 40)), face_turns=int(fcfg.get("face_turns", 12)),
                    effort=fcfg.get("effort", "medium"), phases=("draw", "face") if face else ("draw",),
-                   face=face, concept_face=cface, notes=ctx.notes())
+                   face=face, concept_face=cface, notes=ctx.notes(), log=ctx.log,
+                   live=LivePreview(ctx.asset.dir, "artist"))
     drawn = ctx.projectio.load_project(s["project"])
     ctx.save_project("project", drawn)
     ctx.save_image("preview", "artist.png", imaging.load_rgba(s["png"]))

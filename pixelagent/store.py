@@ -37,6 +37,29 @@ def _retry_locked(fn, tries=40, wait=0.025):
             time.sleep(wait)
 
 
+def month_spend_all(projects_dir):
+    """USD logged this calendar month by every project folder in projects_dir."""
+    total = 0.0
+    try:
+        names = os.listdir(projects_dir)
+    except OSError:
+        return 0.0
+    prefix = datetime.date.today().strftime("%Y-%m")
+    for n in names:
+        p = os.path.join(projects_dir, n, "costs.jsonl")
+        if not os.path.isfile(p):
+            continue
+        with open(p, encoding="utf-8") as f:
+            for line in f:
+                try:
+                    e = json.loads(line)
+                except ValueError:
+                    continue
+                if str(e.get("time", "")).startswith(prefix):
+                    total += float(e.get("usd", 0) or 0)
+    return total
+
+
 class Project:
     def __init__(self, root, overrides=None):
         self.root = os.path.abspath(os.path.expanduser(root))

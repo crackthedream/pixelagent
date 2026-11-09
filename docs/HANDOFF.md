@@ -2,8 +2,8 @@
 
 A handoff document for an AI developer (GPT) continuing this project. It describes what exists, how it works,
 what has been measured, which decisions the owner has made, and what is left to build, in priority order.
-Status as of 2026-11-09, commit `ef42e79` of `crackthedream/pixelagent` and `7801b3e` of
-`crackthedream/pixelliner-mcp` (both private GitHub repositories).
+Status as of 2026-11-09 (updated after the first seven roadmap items; see `git log` of `crackthedream/pixelagent`
+and `7801b3e` of `crackthedream/pixelliner-mcp`, both private GitHub repositories).
 
 ---
 
@@ -227,6 +227,13 @@ default** (faces 13–17 px wide). At 96 px the drawing costs $0.80–0.95 and t
 full character from a prompt costs about **$1.10**. Model judges are unreliable on faces this small, so judge
 faces by eye.
 
+**First real run from the app/exe** (2026-11-09, "Lantern Keeper", prompt, 96 px): plan $0.02, 4 concepts
+$0.15, drawing $0.88 (27 rounds), face pass $0.51 (9 rounds), critique $0.01: **$1.60** (upper bound: cached input
+is counted at full price). The face pass was expensive because it continued the drawing conversation, re-sending
+every earlier round and image; it now starts a fresh conversation as in the face-pass benchmark ($0.05-0.08), so a
+96-px character should cost about $1.15. Result: clear silhouette, lantern and scarf read well; the face (eyes and
+mouth merging into dark marks at 1x) is still the weak point, as the critic also said.
+
 **Animation, first real run** (Mushroom Traveler, 96 px, 6-frame walk): plan + pose sheet $0.07, drawing $1.46
 (69 rounds), **$1.53 total**. The palette was identical (25 colours) in all frames, and the opaque-area spread
 was 3.3 %. The owner approved and exported it.
@@ -248,6 +255,7 @@ runs were cleaned up.
 | 96 px | Default height 96; face detection fixes | `40e38f8` |
 | M3 | Prompt-driven animation pipeline | `5c5c96c` |
 | App | Desktop app, security hardening, paused/resume, `PixelAgent.exe` packaging, 11 app tests | `ef42e79` |
+| Roadmap 1-7 | Real run from the exe; UI pass for animations and references; README; live drawing view; delete/rename/duplicate; versions and redo; cost estimates and limits; face-pass cost fix | after `78fb9cf` |
 
 ---
 
@@ -261,15 +269,28 @@ runs were cleaned up.
   `#/characters`, `#/animations`, `#/item/<id>`, `#/settings`. It polls while something runs, plus a 30 s
   heartbeat (`/api/ping`).
 - Settings in `~/.pixelagent/settings.json` (env `PIXELAGENT_SETTINGS` overrides; used by tests):
-  `projects_dir` (default `~/Documents/PixelAgent`), `backend` (`openai` | `dry_run`), `monthly_usd` (90),
-  `sprite_height` (64/96/128, default 96), `current_project`.
+  `projects_dir` (default `~/Documents/PixelAgent`), `backend` (`openai` | `dry_run`), `monthly_usd` (90, one
+  limit for all projects together), `asset_usd` (3, limit per item including redraws), `sprite_height`
+  (64/96/128, default 96), `current_project`.
+- Deletes go to the Windows Recycle Bin (`pixelagent/trash.py`, shell API, restorable); `PIXELAGENT_TRASH_DIR`
+  redirects them to a folder (tests).
+- Live drawing: after every drawing round the artist exports its drawing (never the tracing layer) to
+  `<asset>/live/live.png` + `live.json` (`pixelagent/live.py`); the app shows it while the item runs.
 
 ### 10.2 API
 GET `/`, `/static/*`, `/files?project=&path=` (confined to the project folder), `/api/ping`, `/api/overview`,
 `/api/assets?project=`, `/api/asset?project=&id=`.
 POST `/api/projects`, `/api/current`, `/api/characters` (prompt and/or data-URL reference image),
 `/api/animations`, `/api/decide` (approve / reject with note / pick / edited spec at gate A), `/api/run`
-(start or continue), `/api/open` (PixelLiner or folder), `/api/settings` (validated; optional API key).
+(start or continue), `/api/open` (PixelLiner or folder), `/api/settings` (validated; optional API key),
+`/api/item/rename|duplicate|delete`, `/api/project/rename|delete|open`, `/api/versions/restore`
+(make an older sprite/frames version current; later cheap steps rerun), `/api/redo` (rerun from a milestone).
+A missing item answers 404 with `not_found`. Paid actions check the limits first (`spend_check`) and refuse
+before changing anything; approving the final sprite or animation (export only, free) is never blocked.
+
+Item details also carry `live` (while drawing), `versions` (sprite or frame versions with thumbnails) and
+`redo` (estimated cost per milestone; 0 in test mode). The overview carries `month_spent` (all projects) and
+`estimates` (character by height, animation base + per frame).
 
 Each asset summary carries `gate`, `running`, `failed` and `paused`. **Paused** means stopped between steps
 (for example, the app was closed mid-run), and the UI offers **Continue**. Milestone grouping for progress:
@@ -296,8 +317,20 @@ Poses, Frame traces, Drawing frames, Your approval, Export.
   - Hero stage with zoom (Fit/1×/2×/4×/8×). Before anything is drawn, it is a compact placeholder.
   - Decision panel per gate: an editable plan; a concept picker (one column per candidate, and the hero
     previews the selected concept); approve or redraw with a note; pose sheet; animation.
-  - A quiet "working" panel while running, and a Paused panel.
-  - Inspector: progress, details, exports, animations, activity log.
+  - A quiet "working" panel while running, and a Paused panel. While the model draws, the stage shows the live
+    drawing with a "Drawing live, round N" (or "Drawing frame k of n") badge.
+  - Inspector: progress (finished milestones have a Redo button, with a cost estimate in a confirmation
+    alert), details (with a link to the reference image), versions (click to preview on the stage, "Use this
+    version"), exports, animations, activity log.
+  - The stage shows the reference image until a concept exists, the pose sheet at gate P, and the 1x GIF at
+    gate R with every frame as its own tile below. Paintings (concepts, pose sheets) are smoothly scaled to an
+    exact fitted size; pixel art always at whole-number zoom.
+- **Menus and alerts:** a More button (toolbar) and right-click on tiles and project rows open a macOS-style menu
+  (Rename, Duplicate, Show in folder, Delete). Deletes use a centered alert with the app icon, Cancel focused
+  and a red Delete; a character's animations are named and deleted with it.
+- **Narrow windows:** below 900 px the sidebar collapses behind a toolbar button and slides in over the page.
+- **Spending:** the New character and New animation sheets show an estimate next to Create; a banner appears
+  at 80 % and at 100 % of the monthly limit; Settings has the monthly limit and the limit per item.
 - **Sheets:** drop from the top, as on macOS. "New character" has two tabs, Describe and Reference image
   (drag and drop). "New animation" offers preset chips and a frame count. A click outside a sheet with typed
   content only nudges it (shakes).
@@ -319,22 +352,25 @@ Poses, Frame traces, Drawing frames, Your approval, Export.
   - the UI served from the bundle;
   - the Edge app window;
   - second-launch detection.
-- **Not yet verified:** a real OpenAI run from the exe.
+- **Verified with real models (2026-11-09):** a character from a prompt through every gate to export from the
+  exe ($1.60, see section 8). A real animation from the exe has not been run (the same code path; about $1.60).
 
 ---
 
 ## 11. Tests
 
-61 `unittest` tests in `tests/`, all in dry-run mode:
+77 `unittest` tests in `tests/`, all in dry-run mode or with scripted fake models:
 
 | File | Tests | Covers |
 |---|---|---|
 | `test_pipeline.py` | 11 | Steps, gates, versions, resume |
 | `test_quality_mechanisms.py` | 15 | Section 7 mechanisms |
 | `test_openai_backend.py` | 12 | Request shapes, strict schemas, cost math (mocked) |
-| `test_artist.py` | 7 | Artist agent tools/session |
+| `test_artist.py` | 8 | Artist agent tools/session; the face pass starts a fresh conversation |
 | `test_animation.py` | 5 | Animation steps |
-| `test_app.py` | 11 | App API end-to-end, security, paused runs, animation listing, single instance, save retry |
+| `test_app.py` | 16 | App API end-to-end, references, animation review, security, paused runs, managing items and projects, single instance, save retry |
+| `test_live.py` | 5 | Live drawing through the real engine (never the trace), staleness, shown only while running |
+| `test_budget.py` | 5 | One monthly limit for all projects, limit per item, refusing before creating, free final export, drawing loop stopping |
 
 Note: dry-run stubs exercise the plumbing only. The stub labeller groups clusters by hue and can merge
 materials, and the artist step is skipped in dry-run mode. Visual quality can only be judged with real models.
@@ -343,14 +379,13 @@ materials, and the artist step is skipped in dry-run mode. Visual quality can on
 
 ## 12. Known issues and limits
 
-1. **No real run has been made from the app or the exe yet.** All real runs so far used the CLI and benchmark
-   scripts.
-2. **The animation flow and reference-image upload have only been tested from the UI in test mode in part.**
-   The new-character flow was tested end to end. Animation pages were viewed, but the New animation → gate P →
-   gate R flow was not driven through the UI.
-3. **No asset management in the UI:** no delete, rename or duplicate for characters or projects. Older step
-   versions are kept on disk, but the UI cannot show or restore them. There is no "rerun from step" in the UI
-   (the CLI has `--from`).
+1. **No real animation from the exe yet** (characters: done). Cost estimates are upper bounds: cached input is
+   priced in full in `agent_session._price`; actual billing is lower.
+2. **Versions** are listed for the sprite drawing and the animation frames only (concept versions stay on disk
+   but are not shown). Animations drawn before 2026-11-09 have no 1x GIF or per-frame PNGs, so their oldest
+   version thumbnail is the 4x GIF and their review shows the frame strip instead of tiles.
+3. **Budget scope:** the app's monthly limit covers every project in its projects folder; command-line runs
+   (`python -m pixelagent`) still count their own project only.
 4. **Faces at 96 px** are much better than at 64 px but remain the weakest part. Model judges cannot rate them
    reliably.
 5. **Character-tuned pipeline.** `CharacterSpec.asset_type` accepts `prop`, `tile` and `scene`, but the steps
@@ -358,14 +393,10 @@ materials, and the artist step is skipped in dry-run mode. Visual quality can on
    practice.
 6. **Image-model prices are unverified.** Costs are estimates; `costs.jsonl` keeps raw token counts for
    recomputation.
-7. **Stale texts:**
-   - README status line ("M1 in progress") and its Files and Pipeline tables (missing `matmap` and `artist`);
-   - `steps/later.py` animate message;
-   - `config.toml` comment "Used from M1".
-8. **Windows-only parts:** `winreg` for the key and the Edge lookup, and `os.startfile`.
-9. **Distribution:** the exe is unsigned, so Windows SmartScreen will warn on other machines. There is no
+7. **Windows-only parts:** `winreg` for the key and the Edge lookup, and `os.startfile`.
+8. **Distribution:** the exe is unsigned, so Windows SmartScreen will warn on other machines. There is no
    installer and no auto-update.
-10. **Single user, local only,** by design. The server must never bind to anything other than 127.0.0.1.
+9. **Single user, local only,** by design. The server must never bind to anything other than 127.0.0.1.
 
 ---
 
@@ -374,70 +405,55 @@ materials, and the artist step is skipped in dry-run mode. Visual quality can on
 Each item has a goal, the main files, and what "done" means. Run everything in dry-run mode first. Real runs
 cost money: estimate and ask first.
 
-### P0: validate what exists
-1. **First real run from the exe.**
-   - **Goal:** confirm the artist and face pass work through the frozen engine with real models.
-   - **Files:** `dist/PixelAgent.exe`, `mcp_client.py`, `artist.py`.
-   - **Done when:** one character from a prompt reaches export in OpenAI mode from the exe, with cost close to
-     $1.10 and `app.log` clean. Then do one animation (about $1.50).
-2. **UI pass for animations and references.**
-   - **Done when:** in test mode, through the UI only, you can (a) create a character from a reference image
-     (drag and drop) and (b) create an animation and pass gates P and R, both with screenshots reviewed in
-     light and dark mode. Fix any issues found.
-3. **Refresh stale texts** (section 12, item 7). The README is the entry point for every future developer.
+### Done on 2026-11-09
+Real run from the exe (character), the UI pass for animations and reference images, README refresh, live
+drawing view, delete/rename/duplicate, versions and "redo from here", cost estimates and spending limits, plus
+the fixes they turned up: the face-pass cost, a race when the page read an item twice during a save, Windows
+file locks on `state.json`, the user's name being replaced by the planner, cropped concepts on the stage, and
+an animation-listing bug.
 
-### P1: product gaps in the app
-4. **Asset management.**
-   - Delete (to the Recycle Bin), rename and duplicate for characters, animations and projects, with
-     confirmation sheets in the Apple style.
-   - Deleting a character must handle its animations (ask).
-   - **Files:** `app/server.py`, `app.js`, `store.py`.
-5. **Version history and "redo from here".**
-   - Show older versions of the sprite and the concept (they are on disk under `vNNN/`).
-   - Let the user restore one, or rerun from a chosen milestone (maps to `Pipeline.reset_from(step)` then
-     `Pipeline.run()`, as the CLI's `run --from` does).
-6. **Cost preview and budget visibility.**
-   - Show an estimate before starting (character about $1.10, animation about $1.50 at 96 px).
-   - Show per-asset spend live, and warn near the monthly cap.
-   - The cap logic exists in `models.py` / `pipeline.py`.
-7. **Live drawing view.** While the artist draws, show the canvas updating: the engine can export a preview
-   each round. This is the most "magical" part of the product and is currently invisible.
-8. **More animation presets and export targets.**
+### Next: app
+1. **One real animation from the exe** (about $1.60) to confirm the frame drawing and the live frame view with
+   real models.
+2. **More animation presets and export targets.**
    - Presets: idle, run, attack, jump, hurt, death, cast, with frame defaults.
    - Exports: sheet metadata for game engines (Aseprite JSON, Godot SpriteFrames, Unity), and multi-row sheets.
+3. **Concept versions** in the Versions card (concept step outputs are on disk under `vNNN/`).
+4. **Accurate costs:** price cached input at its discounted rate (needs the cached-input prices per model in
+   `config.toml [pricing]`).
 
-### P1: quality
-9. **Reference-image benchmark.**
+### Next: quality
+5. **Reference-image benchmark.**
    - About 10 reference images in `benchmarks/refs`. Evaluate `[concept] clean_reference` on and off,
      comparing distance to the reference, specks, and owner ratings in `benchmarks/ratings.csv`.
    - The prompt path is well measured; the reference path is not.
-10. **Faces.** Build a small human-rated face set (owner ratings) and use it to compare face-pass prompts and
+6. **Faces.** Build a small human-rated face set (owner ratings) and use it to compare face-pass prompts and
     variants. Do not rely on model judges.
-11. **Directions and consistency.** Front/side/back (4- or 8-direction) sprites of the same character with an
+7. **Directions and consistency.** Front/side/back (4- or 8-direction) sprites of the same character with an
     identical palette and proportions, reusing the animation approach: one sheet for all views, then shared
     scale and palette.
 
-### P2: scope the owner asked for: objects and scenes
-12. **Props/objects** (`asset_type = "prop"`):
+### Later: objects and scenes (the owner requires them)
+8. **Props/objects** (`asset_type = "prop"`):
     - Skip the face pass, use object-appropriate material labels, set the size from the spec.
     - Done when three benchmark props (for example a weapon, a chest, a potion) export cleanly.
-13. **Tiles and tilesets** (`"tile"`):
+9. **Tiles and tilesets** (`"tile"`):
     - Seamless edges (a wrap-around lint), autotile variants (corners and edges), and a shared palette with
       the characters.
     - Needs new engine checks: tiling preview and edge continuity lint.
-14. **Scenes/backgrounds** (`"scene"`):
+10. **Scenes/backgrounds** (`"scene"`):
     - Larger canvases, parallax layers, perspective. Likely a different pipeline (layout → layers → artist per
       layer).
     - Start with a design doc and a benchmark before code.
 
-### P2: distribution
-15. **Signing and installer:**
+### Later: distribution
+11. **Signing and installer:**
     - code-sign the exe (to avoid the SmartScreen warning);
     - an installer (MSIX or Inno Setup) with a Start menu entry;
     - optional auto-update from GitHub releases.
-16. **First-run onboarding:** a welcome sheet that sets the API key, explains test-run mode and creates a
+12. **First-run onboarding:** a welcome sheet that sets the API key, explains test-run mode and creates a
     first project.
-17. **Cross-platform:** abstract the Windows-only calls (`winreg`, `os.startfile`, the Edge lookup) if macOS or
+13. **Cross-platform:** abstract the Windows-only calls (`winreg`, `os.startfile`, the Edge lookup) if macOS or
     Linux are ever wanted.
 
 ---

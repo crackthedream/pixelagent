@@ -2,6 +2,8 @@
 import importlib
 import json
 import os
+import time
+import re
 import traceback
 from dataclasses import dataclass
 from typing import Callable, Optional
@@ -34,6 +36,7 @@ class Ctx:
         self.info = {}
         self.needs_gate = bool(step.gate)
         self.skipped = False
+        self.log = print  # replaced by the run's log (the app shows it as Activity)
         load_engine(self.cfg)
         self.canvas = importlib.import_module("canvas")
         self.art = importlib.import_module("art")
@@ -110,6 +113,52 @@ class Pipeline:
                     self.asset.state.gates.pop(s.gate, None)
         self.asset.save()
 
+    def versions(self, name):
+        """Finished versions of a step, oldest first: [{version, dir, outputs, time, current}]."""
+        s = self.step(name)
+        rec = self.asset.state.steps.get(name)
+        root = os.path.join(self.asset.dir, "steps", f"{s.index:02d}_{name}")
+        if not rec or not os.path.isdir(root):
+            return []
+        cur_dir = rec.info.get("dir", "").replace("\\", "/").rstrip("/")
+        out = []
+        for d in sorted(os.listdir(root)):
+            m = re.fullmatch(r"v(\d{3})", d)
+            if not m:
+                continue
+            vdir = os.path.join(root, d)
+            rel_dir = self.asset.rel(vdir)
+            outputs = None
+            try:
+                with open(os.path.join(vdir, "outputs.json"), encoding="utf-8") as f:
+                    outputs = json.load(f)["outputs"]
+            except (OSError, ValueError, KeyError):
+                if cur_dir and rec.outputs:  # versions made before outputs.json: same file names, other folder
+                    outputs = {k: v.replace(cur_dir + "/", rel_dir + "/", 1) for k, v in rec.outputs.items()
+                               if v.startswith(cur_dir + "/")}
+                    outputs = {k: v for k, v in outputs.items() if os.path.exists(self.asset.path(v))}
+            if not outputs:
+                continue  # a run that failed or stopped before finishing
+            out.append({"version": int(m.group(1)), "dir": rel_dir, "outputs": outputs,
+                        "time": os.path.getmtime(vdir), "current": rel_dir == cur_dir})
+        return out
+
+    def restore_version(self, name, version):
+        """Make an older finished version of a step current again; every later step runs again (they are cheap
+        after the artist: critique, the review gate, export). Newer versions stay on disk."""
+        v = next((x for x in self.versions(name) if x["version"] == int(version)), None)
+        if v is None:
+            raise ValueError(f"no finished version {version} of {name}")
+        rec = self.asset.record(name)
+        rec.outputs = dict(v["outputs"])
+        rec.info["dir"] = v["dir"]
+        rec.status, rec.error = "done", ""
+        later = [s for s in self.steps if s.index > self.step(name).index]
+        if later:
+            self.reset_from(later[0].name)
+        else:
+            self.asset.save()
+
     def pending_gate(self):
         for s in self.steps:
             rec = self.asset.state.steps.get(s.name)
@@ -147,6 +196,7 @@ class Pipeline:
             if rec.status in ("pending", "failed"):
                 out = self.asset.new_version_dir(s.index, s.name)
                 ctx = Ctx(self.project, self.asset, self.backend, s, out)
+                ctx.log = log
                 log(f"[{s.index:02d} {s.name}] running (v{rec.version:03d})")
                 try:
                     s.run(ctx)
@@ -160,6 +210,11 @@ class Pipeline:
                 rec.outputs = {k: self.asset.rel(v) for k, v in ctx.outputs.items()}
                 rec.info, rec.error = ctx.info, ""
                 rec.info["dir"] = self.asset.rel(out)
+                try:  # each version folder remembers its outputs, so an older version can be restored later
+                    with open(os.path.join(out, "outputs.json"), "w", encoding="utf-8") as f:
+                        json.dump({"version": rec.version, "outputs": rec.outputs, "time": time.time()}, f, indent=1)
+                except OSError:
+                    pass
                 if ctx.skipped:
                     rec.status = "skipped"
                     log(f"[{s.index:02d} {s.name}] skipped: {ctx.info.get('reason', '')}")

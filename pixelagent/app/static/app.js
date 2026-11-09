@@ -11,7 +11,7 @@ const GATE_TEXT = {
 };
 const STEP_LABEL = (s) => s.label;
 
-const state = { overview: null, items: [], detailSig: "", pollTimer: null, zoom: "fit", pick: null };
+const state = { overview: null, items: [], detailSig: "", pollTimer: null, zoom: "fit", pick: null, viewVersion: null };
 
 // ------------------------------------------------------------------ api
 
@@ -19,7 +19,12 @@ async function api(path, body) {
   const opt = body === undefined ? {} : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) };
   const r = await fetch(path, opt);
   const data = await r.json().catch(() => ({ error: `HTTP ${r.status}` }));
-  if (!r.ok || data.error) throw new Error(data.error || `HTTP ${r.status}`);
+  if (!r.ok || data.error) {
+    const err = new Error(data.error || `HTTP ${r.status}`);
+    err.status = r.status;
+    err.notFound = !!data.not_found;
+    throw err;
+  }
   return data;
 }
 
@@ -55,7 +60,8 @@ async function loadOverview() {
 async function loadItems() {
   if (!project()) { state.items = []; return; }
   state.items = (await api(`/api/assets?project=${encodeURIComponent(project())}`)).items;
-  const wait = (k) => state.items.filter((i) => i.kind === k && i.gate && !i.running).length;
+  // same rule as the "Needs you" filter: waiting at a gate, paused, or stopped
+  const wait = (k) => state.items.filter((i) => i.kind === k && !i.running && (i.gate || i.paused || i.failed)).length;
   for (const [k, id] of [["character", "badge-characters"], ["animation", "badge-animations"]]) {
     const n = wait(k);
     const b = $("#" + id);
@@ -64,13 +70,39 @@ async function loadItems() {
   }
 }
 
+// ------------------------------------------------------------------ spending
+
+const testMode = () => state.overview && state.overview.settings.backend === "dry_run";
+function estimateText(usd) {
+  return testMode() ? "Test run: no cost" : `About $${usd.toFixed(2)} (estimate)`;
+}
+function characterEstimate(height) {
+  const e = state.overview.estimates.character;
+  return e[String(height)] ?? e["96"];
+}
+function animationEstimate(frames) {
+  const e = state.overview.estimates;
+  return e.animation_base + e.animation_per_frame * (Number(frames) || 6);
+}
+function spendBanner() {
+  const o = state.overview;
+  if (!o || testMode()) return "";
+  const cap = Number(o.settings.monthly_usd) || 0, spent = o.month_spent;
+  if (!cap || spent < cap * 0.8) return "";
+  const text = spent >= cap
+    ? `This month's $${cap.toFixed(0)} limit is used up ($${spent.toFixed(2)} spent). New work won't start until next month, unless you raise the limit in Settings.`
+    : `You've used $${spent.toFixed(2)} of this month's $${cap.toFixed(0)} limit. Work stops when the limit is reached.`;
+  return `<div class="banner ${spent >= cap ? "bad" : "warn"}"><span>${esc(text)}</span><a class="link" href="#/settings">Settings</a></div>`;
+}
+
 // ------------------------------------------------------------------ sidebar
 
 function renderSidebar() {
   const o = state.overview;
   $("#project-list").innerHTML = o.projects.map((p) => `
-    <button class="side-item project-item ${p === o.current ? "current active" : ""}" data-project="${esc(p)}">
-      ${icon("folder")}<span>${esc(p)}</span></button>`).join("");
+    <div class="side-row"><button class="side-item project-item ${p === o.current ? "current active" : ""}" data-project="${esc(p)}">
+      ${icon("folder")}<span>${esc(p)}</span></button>
+      <button class="side-more" data-project-more="${esc(p)}" aria-label="Actions for ${esc(p)}">${icon("more")}</button></div>`).join("");
   const cap = Number(o.settings.monthly_usd) || 1;
   const pct = Math.min(100, (o.month_spent / cap) * 100);
   $("#spend-text").textContent = `$${o.month_spent.toFixed(2)} of $${cap.toFixed(0)}`;
@@ -84,6 +116,8 @@ function renderSidebar() {
 }
 
 document.addEventListener("click", async (e) => {
+  const more = e.target.closest("[data-project-more]");
+  if (more) { openMenu(more, projectMenu(more.dataset.projectMore)); return; }
   const p = e.target.closest("[data-project]");
   if (p) {
     await act(() => api("/api/current", { project: p.dataset.project }));
@@ -100,7 +134,9 @@ function route() {
   return { view, id: parts[1] ? decodeURIComponent(parts[1]) : null, from: sessionStorage.getItem("from") || "characters" };
 }
 
-window.addEventListener("hashchange", () => { state.detailSig = ""; state.zoom = "fit"; state.pick = null; render(); });
+window.addEventListener("hashchange", () => {
+  state.detailSig = ""; state.zoom = "fit"; state.pick = null; state.viewVersion = null; render();
+});
 
 async function refresh(force) {
   await loadOverview();
@@ -121,7 +157,16 @@ async function render(fromRefresh) {
   return renderLibrary(r.view === "animations" ? "animation" : "character");
 }
 
-function setToolbar(html) { $("#toolbar").innerHTML = html; }
+function setToolbar(html) {
+  // narrow windows: the sidebar collapses behind this button, as in macOS apps
+  $("#toolbar").innerHTML = `<button class="btn icon-only plain sidebar-toggle" id="btn-sidebar" aria-label="Show sidebar"
+      aria-controls="sidebar">${icon("sidebar")}</button>` + html;
+  $("#btn-sidebar").onclick = () => $("#app").classList.toggle("sidebar-open");
+}
+$("#sidebar-scrim").addEventListener("click", () => $("#app").classList.remove("sidebar-open"));
+document.addEventListener("click", (e) => {  // choosing anything in the slid-in sidebar closes it
+  if (e.target.closest(".sidebar .side-item")) $("#app").classList.remove("sidebar-open");
+});
 
 // ------------------------------------------------------------------ library
 
@@ -142,7 +187,7 @@ function stageImg(url, alt) {
 function fitPixel(img, fill = 0.84) {
   const box = img.parentElement;
   if (!box || !img.naturalWidth) return;
-  if (img.naturalWidth > 512) { img.style.width = ""; return; }   // a painting (concept), not pixel art
+  if (img.naturalWidth > 512) { img.style.width = ""; img.style.imageRendering = "auto"; return; }  // a painting (concept), not pixel art
   const fit = Math.min((box.clientWidth * fill) / img.naturalWidth, (box.clientHeight * fill) / img.naturalHeight);
   // whole-number zoom; when too big, a whole-number divisor (1/2, 1/3...) keeps pixels evenly sized too
   const k = fit >= 1 ? Math.floor(fit) : 1 / Math.ceil(1 / fit);
@@ -183,10 +228,10 @@ function renderLibrary(kind) {
     if (en) en.onclick = () => sheetNewCharacter();
     return;
   }
-  c.innerHTML = `
+  c.innerHTML = `${spendBanner()}
     <div class="page-head"><div><h1>${plural}</h1></div></div>
     ${items.length ? `<div class="grid">${items.map((i) => `
-      <a class="tile" href="#/item/${encodeURIComponent(i.id)}" aria-label="${esc(i.name)}">
+      <a class="tile" href="#/item/${encodeURIComponent(i.id)}" data-id="${esc(i.id)}" aria-label="${esc(i.name)}">
         <div class="stage ${i.thumb ? "" : "empty"}">${stageImg(i.thumb, i.name)}
           ${i.running ? `<span class="working"><span class="spinner"></span>Working</span>` : ""}</div>
         <div class="tile-name">${esc(i.name)}${i.character_name ? `<span class="tile-of">${esc(i.character_name)}</span>` : ""}</div>
@@ -214,13 +259,19 @@ async function renderDetail(id, fromRefresh) {
   try {
     d = await api(`/api/asset?project=${encodeURIComponent(project())}&id=${encodeURIComponent(id)}`);
   } catch (e) {
-    $("#content").innerHTML = emptyState("x", "This item could not be opened", e.message, "");
+    setToolbar(`<div class="title">${esc(project())}</div>`);
+    $("#content").innerHTML = e.notFound
+      ? emptyState("folder", "Not in this project", `It isn't in “${project()}”. It may have been deleted, or it belongs to another project.`,
+          `<a class="btn round" href="#/${sessionStorage.getItem("from") || "characters"}">${icon("chevron-left")}Back to the library</a>`)
+      : emptyState("x", "This item could not be opened", e.message, "");
     return;
   }
-  const sig = JSON.stringify([d.status, d.running, d.steps.map((s) => [s.status, s.version]), d.gate, d.log.length, d.job_error]);
+  const sig = JSON.stringify([d.status, d.running, d.steps.map((s) => [s.status, s.version]), d.gate, d.log.length, d.job_error,
+    d.live && d.live.url]);
   schedulePoll(d.running ? 1500 : 0);
   if (fromRefresh && sig === state.detailSig) return;   // nothing changed: keep the page (and anything typed) as is
   state.detailSig = sig;
+  if (d.live) await new Promise((res) => { const im = new Image(); im.onload = im.onerror = res; im.src = d.live.url; });
 
   const from = d.kind === "animation" ? "animations" : "characters";
   sessionStorage.setItem("from", from);
@@ -229,12 +280,17 @@ async function renderDetail(id, fromRefresh) {
   setToolbar(`<div class="title">${esc(d.name)}</div><div class="spacer"></div>
     ${d.failed || d.job_error ? `<button class="btn" id="btn-retry">${icon("retry")}Try again</button>` : ""}
     ${d.exports ? `<button class="btn" id="btn-folder">${icon("folder")}Show in folder</button>
-                   <button class="btn primary" id="btn-pl">${icon("export")}Open in PixelLiner</button>` : ""}`);
+                   <button class="btn primary" id="btn-pl">${icon("export")}Open in PixelLiner</button>` : ""}
+    <button class="btn icon-only" id="btn-more" aria-label="More actions" aria-haspopup="menu">${icon("more")}</button>`);
 
   const gd = d.gate_detail;
-  const heroUrl = d.kind === "animation" && gd && gd.id === "R" ? gd.image
-    : gd && gd.candidates && state.pick !== null && gd.candidates[state.pick] ? gd.candidates[state.pick] : d.hero;
-  $("#content").innerHTML = `
+  const viewing = !d.running && state.viewVersion !== null
+    ? (d.versions.items.find((v) => v.version === state.viewVersion && !v.current) || null) : null;
+  const heroUrl = viewing ? viewing.url
+    : d.kind === "animation" && gd && (gd.id === "R" || gd.id === "P") ? gd.image
+    : gd && gd.candidates && state.pick !== null && gd.candidates[state.pick] ? gd.candidates[state.pick]
+    : d.live ? d.live.url : d.hero;
+  $("#content").innerHTML = `${spendBanner()}
     <a class="back" href="#/${from}">${icon("chevron-left")}${backLabel}</a>
     <div class="page-head"><div><h1>${esc(d.name)}</h1>
       ${d.kind === "animation" && d.character_name ? `<div class="sub">${esc(d.character_name)}</div>` : ""}
@@ -247,7 +303,11 @@ async function renderDetail(id, fromRefresh) {
             </div></div><img id="hero-img" src="${esc(heroUrl)}" alt="${esc(d.name)}">`
           : `<div class="hero-empty">${icon(d.kind === "animation" ? "film" : "sparkle")}<span>${d.kind === "animation"
               ? "Frames appear here once the poses are approved." : "The sprite appears here once it has been drawn."}</span></div>`}
+          ${d.live ? `<span class="live-badge"><span class="live-dot"></span>${esc(liveText(d.live))}</span>` : ""}
           ${d.running ? `<span class="working"><span class="spinner"></span>${esc(currentStep(d))}</span>` : ""}
+          ${viewing ? `<div class="version-bar"><span>Version ${viewing.version}</span><div class="spacer"></div>
+              <button class="btn" id="vb-back">Show current</button>
+              <button class="btn primary" id="vb-use">Use this version</button></div>` : ""}
         </div>
         ${decisionPanel(d)}
       </section>
@@ -256,6 +316,10 @@ async function renderDetail(id, fromRefresh) {
   wireDetail(d);
 }
 
+function liveText(l) {
+  const what = l.frame !== null && l.frame !== undefined ? `Drawing frame ${l.frame + 1} of ${l.frames}` : "Drawing live";
+  return l.turn ? `${what}, round ${l.turn}` : what;
+}
 function currentStep(d) {
   const s = d.steps.find((s) => s.status === "partial" || s.status === "pending" || s.status === "failed");
   return s ? s.label : "Working";
@@ -266,16 +330,28 @@ function inspector(d) {
     const running = d.running && s === d.steps.find((x) => x.status === "partial" || x.status === "pending");
     const cls = running ? "running" : s.status;
     const tail = s.status === "done" ? icon("check") : running ? `<span class="spinner"></span>` : s.status === "awaiting_gate" ? `<span class="dot wait"></span>` : "";
-    return `<li class="${cls}" title="${esc(s.error || "")}"><span class="n">${i + 1}</span><span>${esc(STEP_LABEL(s))}</span>${tail}</li>`;
+    const canRedo = !d.running && (s.status === "done" || s.status === "partial") && d.redo && s.label in d.redo
+      && !["Your approval", "Export"].includes(s.label);
+    const redo = canRedo ? `<button class="redo" data-redo="${esc(s.label)}" aria-label="Redo from ${esc(s.label)}"
+      title="Redo from here">${icon("retry")}</button>` : "";
+    return `<li class="${cls}" title="${esc(s.error || "")}"><span class="n">${i + 1}</span><span>${esc(STEP_LABEL(s))}</span>${redo}${tail}</li>`;
   }).join("");
   const facts = [["Spent", `$${(d.cost || 0).toFixed(2)}`]];
   if (d.inputs.height) facts.push(["Height", `${d.inputs.height} px`]);
   if (d.inputs.frames) facts.push(["Frames", d.inputs.frames]);
+  if (d.reference) facts.push(["Reference", `<a class="link" href="${esc(d.reference)}" target="_blank" rel="noopener">View image</a>`]);
   if (d.character) facts.push(["Character", `<a class="link" href="#/item/${encodeURIComponent(d.character)}">${esc(d.character_name || "Open")}</a>`]);
   let html = `<div class="card"><h2>Progress</h2><ol class="steps">${steps}</ol>
       ${d.job_error ? `<div class="job-error"><strong>Stopped with an error.</strong> Fix the cause, then choose Try again.
         <details><summary>Details</summary><code>${esc(d.job_error)}</code></details></div>` : ""}</div>
     <div class="card"><h2>Details</h2><dl class="kv">${facts.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("")}</dl></div>`;
+  const vers = (d.versions && d.versions.items) || [];
+  if (vers.length > 1) {
+    html += `<div class="card"><h2>Versions</h2><div class="versions">${vers.map((v) => `
+      <button class="version ${v.current ? "current" : ""} ${state.viewVersion === v.version ? "viewing" : ""}" data-version="${v.version}"
+        aria-label="Version ${v.version}${v.current ? ", current" : ""}"><span class="stage">${stageImg(v.url, "Version " + v.version)}</span>
+        <span class="cap">${v.version}${v.current ? ` <span class="tag">Current</span>` : ""}</span></button>`).join("")}</div></div>`;
+  }
   if (d.exports) {
     html += `<div class="card"><h2>Exports</h2><div class="list">${d.exports.filter((e) => e.url).map((e) => `
       <div class="row"><span class="grow">${esc(e.label)}</span><a href="${esc(e.url)}" download>Save</a></div>`).join("")}</div></div>`;
@@ -345,15 +421,17 @@ function decisionPanel(d) {
       <div class="decision-actions"><div class="spacer"></div><button class="btn primary lg" id="btn-approve">Approve and export</button></div></div>`;
   }
   if (g.kind === "poses") {
-    return `<div class="decision">${head("Approve the poses", "Drawing starts once you approve. Rejecting only redraws this sheet.")}
-      <img class="wide-img" src="${esc(g.image)}" alt="Pose sheet">
+    return `<div class="decision">${head("Approve the poses", "The pose sheet is shown above. Drawing starts once you approve; rejecting only redraws the sheet.")}
       <div class="frames">${g.frames.map((f, i) => `<div><b>Frame ${i + 1}</b> <span class="ms">${f.ms} ms</span><br>${esc(f.pose)}</div>`).join("")}</div>
       ${noteRow("Not right? For example: longer strides", "New poses")}
       <div class="decision-actions"><div class="spacer"></div><button class="btn primary lg" id="btn-approve">Approve and draw frames</button></div></div>`;
   }
   if (g.kind === "animation") {
-    return `<div class="decision">${head("Approve the animation", "Playing above at 4×.")}
-      <img class="wide-img" src="${esc(g.strip)}" alt="All frames">
+    return `<div class="decision">${head("Approve the animation", "It plays above; every frame is shown below.")}
+      ${g.frames && g.frames.length
+        ? `<div class="frame-row">${g.frames.map((f, i) => `<figure><span class="stage">${stageImg(f.url, "Frame " + (i + 1))}</span>
+            <figcaption>Frame ${i + 1}${f.ms ? ` <span class="ms">${f.ms} ms</span>` : ""}</figcaption></figure>`).join("")}</div>`
+        : `<img class="wide-img" src="${esc(g.strip)}" alt="All frames">`}
       ${g.issues && g.issues.length ? `<ul class="issues">${g.issues.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>` : ""}
       ${noteRow("What should change? For example: more bounce in the body", "Redraw frames")}
       <div class="decision-actions"><div class="spacer"></div><button class="btn primary lg" id="btn-approve">Approve and export</button></div></div>`;
@@ -368,10 +446,14 @@ function wireDetail(d) {
       const hero = $("#hero");
       const fit = Math.min((hero.clientWidth - 40) / img.naturalWidth, (hero.clientHeight - 40) / img.naturalHeight);
       const z = state.zoom === "fit" ? (fit >= 1 ? Math.floor(fit) : 1 / Math.ceil(1 / fit)) : Number(state.zoom);
-      const isPixel = img.naturalWidth <= 512;
-      img.style.width = isPixel ? Math.round(img.naturalWidth * z) + "px" : "auto";
-      img.style.maxWidth = isPixel ? "none" : "92%";
-      img.style.maxHeight = isPixel ? "none" : "92%";
+      const isPixel = img.naturalWidth <= 512;  // sprites and frames; larger images are paintings (concepts, pose sheets)
+      // paintings get an exact fitted size: a percent max-height does not resolve inside the grid stage
+      img.style.width = Math.round(img.naturalWidth * (isPixel ? z : Math.min(1, fit))) + "px";
+      img.style.maxWidth = "none";
+      img.style.maxHeight = "none";
+      img.style.imageRendering = isPixel ? "" : "auto";  // nearest-neighbour downscaling would make paintings jagged
+      const tools = $(".hero-tools");
+      if (tools) tools.hidden = !isPixel;
     };
     img.complete ? apply() : img.addEventListener("load", apply);
     window.onresize = apply;
@@ -389,6 +471,31 @@ function wireDetail(d) {
   on("#btn-pl", () => act(() => api("/api/open", { project: p, id: d.id, what: "pixelliner" }), "Opening in PixelLiner"));
   on("#btn-folder", () => act(() => api("/api/open", { project: p, id: d.id, what: "folder" })));
   on("#btn-new-anim", () => sheetNewAnimation(d));
+  on("#btn-more", (e) => openMenu(e.currentTarget, itemMenu(d)));
+  document.querySelectorAll("[data-version]").forEach((b) => b.onclick = () => {
+    const v = Number(b.dataset.version);
+    const cur = d.versions.items.find((x) => x.current);
+    state.viewVersion = cur && cur.version === v ? null : v;
+    state.detailSig = "";
+    render();
+  });
+  on("#vb-back", () => { state.viewVersion = null; state.detailSig = ""; render(); });
+  on("#vb-use", () => {
+    const v = state.viewVersion;
+    state.viewVersion = null;
+    act(() => api("/api/versions/restore", { project: p, id: d.id, step: d.versions.step, version: v }),
+      `Version ${v} restored. Checking it again`);
+  });
+  document.querySelectorAll("[data-redo]").forEach((b) => b.onclick = () => {
+    const label = b.dataset.redo, usd = d.redo[label] || 0;
+    showAlert({
+      title: `Redo from ${label}?`,
+      text: `${label} and every later step run again${usd > 0 ? `, for about $${usd.toFixed(2)} (estimate)` : ""}. `
+        + "Nothing is deleted: earlier versions stay in the project, and the run stops whenever it needs you.",
+      confirm: "Redo",
+      onConfirm: () => act(() => api("/api/redo", { project: p, id: d.id, stage: label }), `Redoing from ${label}`),
+    });
+  });
   document.querySelectorAll("#sp-h button, #sp-view button").forEach((b) => b.onclick = () => {
     b.parentElement.querySelectorAll("button").forEach((x) => x.setAttribute("aria-pressed", x === b));
   });
@@ -497,8 +604,11 @@ function sheetNewCharacter() {
         <div class="field"><span class="label">Height</span><div class="segmented" id="nc-h">
           ${[64, 96, 128].map((v) => `<button data-v="${v}" aria-pressed="${v === h}">${v} px</button>`).join("")}</div></div></div>
     </div>
-    <div class="actions"><button class="btn" data-close>Cancel</button><button class="btn primary" id="nc-go">Create character</button></div>`, (s) => {
+    <div class="actions"><span class="estimate" id="nc-est"></span><button class="btn" data-close>Cancel</button><button class="btn primary" id="nc-go">Create character</button></div>`, (s) => {
     wireSegmented(s);
+    const est = () => { $("#nc-est").textContent = estimateText(characterEstimate(segmentedValue($("#nc-h")))); };
+    s.querySelectorAll("#nc-h button").forEach((b) => b.addEventListener("click", est));
+    est();
     s.querySelector("[data-close]").onclick = closeSheet;
     s.querySelectorAll("#nc-mode button").forEach((b) => b.addEventListener("click", () => {
       const ref = segmentedValue($("#nc-mode")) === "ref";
@@ -509,7 +619,20 @@ function sheetNewCharacter() {
     const take = (file) => {
       if (!file || !/^image\/(png|jpeg|webp)$/.test(file.type)) return toast("Use a PNG, JPG or WEBP image", true);
       const rd = new FileReader();
-      rd.onload = () => { reference = rd.result; drop.innerHTML = `<img src="${reference}" alt="Reference">`; drop.classList.add("has-image"); };
+      rd.onload = () => {
+        reference = rd.result;
+        drop.innerHTML = `<img src="${reference}" alt="Reference">`;
+        drop.classList.add("has-image");
+        const img = drop.querySelector("img");
+        img.onload = () => {  // pixel art: crisp whole-number zoom; photos and paintings: smooth fit
+          if (img.naturalWidth <= 256 && img.naturalHeight <= 256) {
+            const k = Math.max(1, Math.floor(Math.min(320 / img.naturalWidth, 220 / img.naturalHeight)));
+            img.style.width = img.naturalWidth * k + "px";
+            img.style.maxHeight = "none";
+            img.style.imageRendering = "pixelated";
+          }
+        };
+      };
       rd.readAsDataURL(file);
     };
     $("#nc-file").onchange = (e) => take(e.target.files[0]);
@@ -542,8 +665,14 @@ function sheetNewAnimation(d) {
         <div class="field"><span class="label">Frames</span><div class="segmented" id="na-f">
           ${[["", "Auto"], ["4", "4"], ["6", "6"], ["8", "8"]].map(([v, l]) => `<button data-v="${v}" aria-pressed="${v === ""}">${l}</button>`).join("")}</div></div></div>
     </div>
-    <div class="actions"><button class="btn" data-close>Cancel</button><button class="btn primary" id="na-go">Create animation</button></div>`, (s) => {
+    <div class="actions"><span class="estimate" id="na-est"></span><button class="btn" data-close>Cancel</button><button class="btn primary" id="na-go">Create animation</button></div>`, (s) => {
     wireSegmented(s);
+    const est = () => {
+      const f = segmentedValue($("#na-f"));
+      $("#na-est").textContent = estimateText(animationEstimate(f)) + (f || testMode() ? "" : ", for about 6 frames");
+    };
+    s.querySelectorAll("#na-f button").forEach((b) => b.addEventListener("click", est));
+    est();
     s.querySelector("[data-close]").onclick = closeSheet;
     s.querySelectorAll("[data-text]").forEach((b) => b.onclick = () => {
       $("#na-prompt").value = b.dataset.text;
@@ -580,8 +709,10 @@ function renderSettings() {
         <div class="segmented" id="st-mode">${[["openai", "OpenAI"], ["dry_run", "Test run"]].map(([v, l]) => `<button data-v="${v}" aria-pressed="${s.backend === v}">${l}</button>`).join("")}</div></div>
       <div class="setting"><div class="grow">Default height<div class="muted">96 px keeps faces readable.</div></div>
         <div class="segmented" id="st-h">${[64, 96, 128].map((v) => `<button data-v="${v}" aria-pressed="${Number(s.sprite_height) === v}">${v} px</button>`).join("")}</div></div>
-      <div class="setting"><div class="grow">Monthly limit<div class="muted">Work stops before spending more than this (estimated).</div></div>
+      <div class="setting"><div class="grow">Monthly limit<div class="muted">For all projects together. Work stops when it is reached (estimated spend).</div></div>
         <label class="affix"><span>US$</span><input class="input" id="st-cap" type="number" min="1" step="1" value="${esc(s.monthly_usd)}" aria-label="Monthly limit in US dollars"></label></div>
+      <div class="setting"><div class="grow">Limit per item<div class="muted">One character or animation, including redraws. A character costs about $1.15.</div></div>
+        <label class="affix"><span>US$</span><input class="input" id="st-item" type="number" min="0.5" step="0.5" value="${esc(s.asset_usd)}" aria-label="Limit per item in US dollars"></label></div>
     </div>
     <div class="group-title">Storage</div>
     <div class="group">
@@ -593,7 +724,7 @@ function renderSettings() {
   wireSegmented($("#content"));
   $("#st-save").onclick = () => act(() => api("/api/settings", {
     backend: segmentedValue($("#st-mode")), sprite_height: Number(segmentedValue($("#st-h"))),
-    monthly_usd: Number($("#st-cap").value), projects_dir: $("#st-dir").value.trim(),
+    monthly_usd: Number($("#st-cap").value), asset_usd: Number($("#st-item").value), projects_dir: $("#st-dir").value.trim(),
   }), "Settings saved");
   $("#st-key-save").onclick = async () => {
     const key = $("#st-key").value.trim();
@@ -612,3 +743,143 @@ function renderSettings() {
     $("#content").innerHTML = emptyState("x", "PixelAgent could not start", e.message, "");
   }
 })();
+
+// ------------------------------------------------------------------ menus (macOS-style pull-down / context menus)
+
+function openMenu(anchor, items, at) {
+  const m = $("#menu");
+  m.innerHTML = items.map((it, i) => it === "-" ? `<div class="menu-sep" role="separator"></div>`
+    : `<button class="menu-item ${it.danger ? "danger" : ""}" role="menuitem" data-i="${i}" ${it.disabled ? "disabled" : ""}>
+         ${it.icon ? icon(it.icon) : `<span class="ic"></span>`}<span>${esc(it.label)}</span></button>`).join("");
+  m.hidden = false;
+  const r = at || anchor.getBoundingClientRect();
+  const w = m.offsetWidth, h = m.offsetHeight;
+  let x = at ? at.x : r.right - w, y = at ? at.y : r.bottom + 6;
+  x = Math.max(8, Math.min(x, innerWidth - w - 8));
+  if (y + h > innerHeight - 8) y = Math.max(8, (at ? at.y : r.top) - h - 6);
+  m.style.left = x + "px";
+  m.style.top = y + "px";
+  m.querySelectorAll(".menu-item").forEach((b) => b.onclick = () => { closeMenu(); items[Number(b.dataset.i)].action(); });
+  const first = m.querySelector(".menu-item:not([disabled])");
+  if (first) first.focus();
+}
+function closeMenu() { $("#menu").hidden = true; }
+document.addEventListener("mousedown", (e) => { if (!$("#menu").hidden && !e.target.closest("#menu")) closeMenu(); }, true);
+document.addEventListener("keydown", (e) => {
+  const m = $("#menu");
+  if (m.hidden) return;
+  if (e.key === "Escape") { closeMenu(); e.stopPropagation(); return; }
+  if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+    const all = [...m.querySelectorAll(".menu-item:not([disabled])")];
+    const i = all.indexOf(document.activeElement);
+    all[(i + (e.key === "ArrowDown" ? 1 : all.length - 1)) % all.length].focus();
+    e.preventDefault();
+  }
+}, true);
+window.addEventListener("blur", closeMenu);
+window.addEventListener("resize", closeMenu);
+
+function itemMenu(it) {
+  const p = project(), busy = !!it.running;
+  return [
+    { label: "Rename…", icon: "pencil", disabled: busy, action: () => sheetRename(it.kind === "animation" ? "Rename animation" : "Rename character",
+      it.name, (name) => api("/api/item/rename", { project: p, id: it.id, name }), "Renamed") },
+    { label: "Duplicate", icon: "copy", disabled: busy, action: async () => {
+      const r = await act(() => api("/api/item/duplicate", { project: p, id: it.id }), "Duplicated");
+      if (r) location.hash = `#/item/${encodeURIComponent(r.id)}`;
+    } },
+    { label: "Show in folder", icon: "folder", action: () => act(() => api("/api/open", { project: p, id: it.id, what: "folder" })) },
+    "-",
+    { label: "Delete…", icon: "trash", danger: true, disabled: busy, action: () => alertDeleteItem(it) },
+  ];
+}
+
+function projectMenu(pid) {
+  return [
+    { label: "Rename…", icon: "pencil", action: () => sheetRename("Rename project", pid, async (name) => {
+      await api("/api/project/rename", { project: pid, name });
+    }, "Renamed") },
+    { label: "Show in folder", icon: "folder", action: () => act(() => api("/api/project/open", { project: pid })) },
+    "-",
+    { label: "Delete project…", icon: "trash", danger: true, action: () => alertDeleteProject(pid) },
+  ];
+}
+
+// right-click on a library tile or a project row: the same menu as its More button
+document.addEventListener("contextmenu", (e) => {
+  const tile = e.target.closest(".tile[data-id]");
+  const proj = e.target.closest("[data-project]");
+  if (!tile && !proj) return;
+  e.preventDefault();
+  if (tile) {
+    const it = state.items.find((i) => i.id === tile.dataset.id);
+    if (it) openMenu(tile, itemMenu(it), { x: e.clientX, y: e.clientY });
+  } else {
+    openMenu(proj, projectMenu(proj.dataset.project), { x: e.clientX, y: e.clientY });
+  }
+});
+
+// ------------------------------------------------------------------ rename sheet and delete alert
+
+function sheetRename(title, current, save, okMsg) {
+  openSheet(`<h2>${esc(title)}</h2>
+    <div class="stack" style="margin-top:14px"><div class="field"><label for="rn-name">Name</label>
+      <input class="input" id="rn-name" value="${esc(current)}" maxlength="80"></div></div>
+    <div class="actions"><button class="btn" id="rn-cancel">Cancel</button><button class="btn primary" id="rn-ok">Rename</button></div>`, (s) => {
+    const inp = $("#rn-name", s);
+    setTimeout(() => inp.select(), 40);
+    const go = async () => {
+      const name = inp.value.trim();
+      if (!name) { inp.focus(); return; }
+      if (name === current) { closeSheet(); return; }
+      const ok = await act(async () => { await save(name); return true; }, okMsg);
+      if (ok) closeSheet();
+    };
+    $("#rn-ok", s).onclick = go;
+    $("#rn-cancel", s).onclick = closeSheet;
+    inp.onkeydown = (e) => { if (e.key === "Enter") go(); };
+  });
+}
+
+function showAlert({ title, text, confirm, danger, onConfirm }) {
+  const back = $("#alert-backdrop");
+  $("#alert").innerHTML = `<span class="brand-mark alert-icon" aria-hidden="true"></span>
+    <h2 id="alert-title">${esc(title)}</h2><p>${esc(text)}</p>
+    <div class="alert-actions"><button class="btn" id="al-cancel">Cancel</button>
+      <button class="btn ${danger ? "destructive" : "primary"}" id="al-ok">${esc(confirm)}</button></div>`;
+  $("#alert").setAttribute("aria-labelledby", "alert-title");
+  back.hidden = false;
+  const close = () => { back.hidden = true; document.removeEventListener("keydown", key, true); };
+  const key = (e) => { if (e.key === "Escape") { close(); e.stopPropagation(); } };
+  document.addEventListener("keydown", key, true);
+  $("#al-cancel").onclick = close;
+  $("#al-ok").onclick = async () => { $("#al-ok").disabled = true; await onConfirm(); close(); };
+  setTimeout(() => $("#al-cancel").focus(), 30);  // like macOS: the safe choice has the focus
+}
+
+function alertDeleteItem(it) {
+  const anims = it.kind === "animation" ? [] : state.items.filter((i) => i.kind === "animation" && i.character === it.id);
+  const extra = anims.length ? ` Its ${anims.length === 1 ? "animation" : anims.length + " animations"} will be deleted too.` : "";
+  showAlert({
+    title: `Delete “${it.name}”?`,
+    text: `It moves to the Recycle Bin with all its versions and exports, so you can restore it from there.${extra}`,
+    confirm: "Delete", danger: true,
+    onConfirm: async () => {
+      const r = await act(() => api("/api/item/delete", { project: project(), id: it.id, with_animations: anims.length > 0 }),
+        "Moved to the Recycle Bin");
+      if (r && route().view === "item") location.hash = `#/${it.kind === "animation" ? "animations" : "characters"}`;
+    },
+  });
+}
+
+function alertDeleteProject(pid) {
+  showAlert({
+    title: `Delete the project “${pid}”?`,
+    text: "Every character and animation in it moves to the Recycle Bin, so you can restore the folder from there.",
+    confirm: "Delete project", danger: true,
+    onConfirm: async () => {
+      const r = await act(() => api("/api/project/delete", { project: pid }), "Moved to the Recycle Bin");
+      if (r) location.hash = "#/characters";
+    },
+  });
+}

@@ -1,7 +1,7 @@
 # pixelagent default configuration. A project folder may contain its own config.toml that overrides these keys.
 
 [engine]
-# The PixelLiner MCP engine (imported as a library; launched as an MCP server by agent steps from M2).
+# The PixelLiner MCP engine (imported as a library; launched as an MCP server for the artist agent).
 path = "~/pixelliner-mcp"
 pixelliner_exe = "C:/Program Files/PixelLiner/PixelLiner.exe"
 
@@ -13,7 +13,7 @@ timeout_s = 240
 max_retries = 4
 max_image_side = 1024        # images sent to models are downscaled to this (saves input tokens)
 
-# Model per role (OpenAI IDs as listed on developers.openai.com/api/docs/models, Nov 2026). Used from M1.
+# Model per role (OpenAI IDs as listed on developers.openai.com/api/docs/models, Nov 2026).
 [models]
 director = "gpt-6.1-sol"
 vision_pick = "gpt-6.1-terra"

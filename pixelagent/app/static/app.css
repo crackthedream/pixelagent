@@ -234,7 +234,9 @@ nav { display: flex; flex-direction: column; gap: 1px; flex: 1; }
 
 .inspector { display: flex; flex-direction: column; gap: 14px; position: sticky; top: 0; }
 .steps { list-style: none; margin: 0; padding: 0; counter-reset: step; }
-.steps li { display: grid; grid-template-columns: 22px 1fr auto; align-items: center; gap: 8px; padding: 5px 0; color: var(--text-2); }
+.steps li { display: flex; align-items: center; gap: 8px; padding: 5px 0; color: var(--text-2); }
+.steps li > span:nth-child(2) { flex: 1; min-width: 0; }
+.steps li .n { flex: none; }
 .steps li .n { width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; font-size: 11px; font-weight: 600; background: var(--fill-2); color: var(--text-3); }
 .steps li.done { color: var(--text); }
 .steps li.done .n { background: var(--accent-soft); color: var(--accent); }
@@ -295,7 +297,8 @@ details summary { cursor: default; color: var(--text-2); font-size: 12px; }
 
 /* ------------------------------------------------------------- empty states */
 .empty-state { max-width: 440px; margin: 12vh auto 0; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 12px; }
-.empty-state .art { width: 76px; height: 76px; border-radius: 18px; }
+.empty-state .art { width: 76px; height: 76px; border-radius: 18px; display: grid; place-items: center; }
+.empty-state .art .ic { width: 30px; height: 30px; color: var(--text-3); }
 .empty-state h2 { margin: 6px 0 0; font: 600 20px/1.25 var(--font-display); }
 .empty-state p { margin: 0; color: var(--text-2); }
 
@@ -345,9 +348,14 @@ details summary { cursor: default; color: var(--text-2); font-size: 12px; }
 .toast.show { opacity: 1; transform: translate(-50%, 0); }
 .toast.error { background: var(--red); color: #fff; }
 
+.sidebar-toggle, .sidebar-scrim { display: none; }
 @media (max-width: 900px) {
   .app { grid-template-columns: 1fr; }
-  .sidebar { display: none; }
+  .sidebar { position: fixed; z-index: 25; left: 0; top: 0; bottom: 0; width: 248px; transform: translateX(-102%);
+    transition: transform .22s cubic-bezier(.2, .8, .2, 1); box-shadow: var(--shadow-sheet); background: var(--window); }
+  .app.sidebar-open .sidebar { transform: none; }
+  .sidebar-toggle { display: inline-flex; margin-right: 4px; }
+  .app.sidebar-open .sidebar-scrim { display: block; position: fixed; inset: 0; z-index: 24; background: rgba(0, 0, 0, 0.18); }
   .detail { grid-template-columns: 1fr; }
   .content { padding: 20px 16px 40px; }
   .spec-grid { grid-template-columns: 1fr; }
@@ -371,3 +379,86 @@ details summary { cursor: default; color: var(--text-2); font-size: 12px; }
 .affix { position: relative; display: inline-flex; align-items: center; width: 120px; }
 .affix span { position: absolute; left: 10px; color: var(--text-2); font-size: 12px; pointer-events: none; }
 .affix .input { width: 100%; padding-left: 40px; text-align: right; font-variant-numeric: tabular-nums; }
+
+/* animation review: every frame as its own small stage, at whole-number zoom */
+.frame-row { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 10px; margin-top: 4px; }
+.frame-row figure { margin: 0; display: flex; flex-direction: column; gap: 6px; }
+.frame-row .stage { aspect-ratio: 3 / 4; border-radius: 10px; box-shadow: var(--shadow-1); }
+.frame-row figcaption { font-size: 12px; font-weight: 600; color: var(--text); padding: 0 2px; }
+.frame-row .ms { font-weight: 400; color: var(--text-3); font-variant-numeric: tabular-nums; margin-left: 4px; }
+
+/* live drawing: the model's canvas as it works */
+.live-badge { position: absolute; left: 12px; top: 12px; display: flex; align-items: center; gap: 7px; z-index: 2;
+  padding: 4px 10px 4px 8px; border-radius: var(--r-pill); font-size: 11px; font-weight: 500;
+  background: color-mix(in srgb, var(--surface) 82%, transparent); backdrop-filter: blur(10px); box-shadow: var(--shadow-1); }
+.live-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--red); animation: live-pulse 1.6s ease-in-out infinite; }
+@keyframes live-pulse { 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { .live-dot { animation: none; } }
+
+/* ------------------------------------------------------------- menus (macOS pull-down / context menu) */
+.menu { position: fixed; z-index: 40; min-width: 200px; padding: 5px; border-radius: 10px;
+  background: color-mix(in srgb, var(--surface) 86%, transparent); backdrop-filter: blur(24px) saturate(1.6);
+  box-shadow: var(--shadow-sheet); animation: menu-in .12s ease-out; }
+@keyframes menu-in { from { opacity: 0; transform: scale(.98); } }
+.menu-item { display: flex; align-items: center; gap: 9px; width: 100%; padding: 5px 9px; border: 0; border-radius: 6px;
+  background: none; color: var(--text); font: inherit; font-size: 13px; text-align: left; cursor: default; }
+.menu-item .ic { width: 15px; height: 15px; color: var(--text-2); flex: none; }
+.menu-item:hover:not([disabled]), .menu-item:focus-visible { background: var(--accent); color: #fff; outline: none; }
+.menu-item:hover:not([disabled]) .ic, .menu-item:focus-visible .ic { color: #fff; }
+.menu-item.danger { color: var(--red); }
+.menu-item.danger .ic { color: var(--red); }
+.menu-item.danger:hover:not([disabled]), .menu-item.danger:focus-visible { background: var(--red); color: #fff; }
+.menu-item[disabled] { opacity: .4; }
+.menu-sep { height: 1px; margin: 5px 9px; background: var(--separator); }
+
+/* project rows: the More button shows on hover or keyboard focus */
+.side-row { position: relative; }
+.side-row .side-item { width: 100%; padding-right: 34px; }
+.side-more { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); width: 24px; height: 22px; border: 0;
+  border-radius: 6px; background: none; color: var(--text-2); display: grid; place-items: center; opacity: 0; cursor: default; }
+.side-more .ic { width: 16px; height: 16px; }
+.side-row:hover .side-more, .side-more:focus-visible { opacity: 1; }
+.side-more:hover { background: var(--fill); }
+
+.btn.icon-only { padding: 0; width: 32px; justify-content: center; }
+.btn.icon-only .ic { width: 18px; height: 18px; }
+.btn.destructive { background: var(--red); color: #fff; box-shadow: none; }
+
+/* ------------------------------------------------------------- alerts (macOS: centered, app icon, safe default) */
+.alert-backdrop { position: fixed; inset: 0; z-index: 30; display: grid; place-items: center; background: rgba(0, 0, 0, 0.18); }
+.alert { width: min(300px, calc(100vw - 32px)); padding: 20px 18px 16px; border-radius: 14px; text-align: center;
+  background: var(--surface); box-shadow: var(--shadow-sheet); animation: alert-in .16s cubic-bezier(.2, .8, .2, 1); }
+@keyframes alert-in { from { opacity: 0; transform: scale(1.04); } }
+.alert .alert-icon { width: 52px; height: 52px; border-radius: 12px; margin: 0 auto 10px; display: block; }
+.alert h2 { margin: 0 0 6px; font: 600 14px/1.35 var(--font-display); }
+.alert p { margin: 0 0 16px; font-size: 12px; line-height: 1.45; color: var(--text-2); }
+.alert-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.alert-actions .btn { justify-content: center; }
+@media (prefers-reduced-motion: reduce) { .menu, .alert { animation: none; } }
+.alert .alert-icon { background-size: 12px 12px; background-position: 13px 13px, 26px 26px, 13px 26px; }
+
+/* ------------------------------------------------------------- versions and redo */
+.versions { display: grid; grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); gap: 8px; }
+.version { border: 0; padding: 0; background: none; display: flex; flex-direction: column; gap: 4px; cursor: default; color: var(--text); }
+.version .stage { aspect-ratio: 3 / 4; border-radius: 8px; box-shadow: var(--shadow-1); }
+.version .cap { font-size: 11px; color: var(--text-2); display: flex; align-items: center; gap: 4px; justify-content: center; }
+.version .tag { font-size: 10px; font-weight: 600; color: var(--accent); }
+.version.viewing .stage { box-shadow: 0 0 0 2px var(--accent); }
+.version.current .stage { box-shadow: 0 0 0 1px var(--accent-soft), var(--shadow-1); }
+.version-bar { position: absolute; left: 12px; right: 12px; bottom: 12px; z-index: 2; display: flex; align-items: center; gap: 8px;
+  padding: 8px 8px 8px 14px; border-radius: 12px; font-weight: 600; font-size: 13px;
+  background: color-mix(in srgb, var(--surface) 84%, transparent); backdrop-filter: blur(14px); box-shadow: var(--shadow-1); }
+.version-bar .spacer { flex: 1; }
+.steps li .redo { width: 22px; height: 22px; border: 0; border-radius: 6px; background: none; color: var(--text-2);
+  display: grid; place-items: center; opacity: 0; cursor: default; }
+.steps li .redo .ic { width: 14px; height: 14px; }
+.steps li:hover .redo, .steps li .redo:focus-visible { opacity: 1; }
+.steps li .redo:hover { background: var(--fill); color: var(--accent); }
+
+
+/* ------------------------------------------------------------- spending */
+.sheet .actions .estimate { margin-right: auto; align-self: center; font-size: 12px; color: var(--text-2); font-variant-numeric: tabular-nums; }
+.banner { display: flex; align-items: center; gap: 12px; margin: 0 0 18px; padding: 10px 14px; border-radius: 10px; font-size: 12px; line-height: 1.45; }
+.banner span { flex: 1; }
+.banner.warn { background: color-mix(in srgb, var(--orange) 14%, transparent); }
+.banner.bad { background: color-mix(in srgb, var(--red) 12%, transparent); }

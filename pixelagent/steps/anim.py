@@ -230,6 +230,8 @@ def draw(ctx):
     acfg = ctx.cfg.get("animation", {})
     engine = load_engine(ctx.cfg)
     mcp = MCPClient(os.path.join(engine, "server.py"), env={"PIXELLINER_MCP_OUT": agent_dir})
+    from ..live import LivePreview
+    live = LivePreview(ctx.asset.dir, "anim_draw", frames=n)
     sess = None
     try:
         txt, _, err = mcp.call("load_project", {"path": start, "name": ctx.asset.id})
@@ -240,7 +242,8 @@ def draw(ctx):
         sess = AgentSession(ctx.project, ctx.asset.id, mcp, client, ctx.cfg["models"].get("artist"), agent_dir,
                             effort=acfg.get("effort", "medium"),
                             allowed=("draw", "view", "compare_reference", "lint", "undo", "redo"),
-                            max_usd=float(acfg.get("max_usd", 4.0)), log=print)
+                            max_usd=float(acfg.get("max_usd", 4.0)), log=ctx.log,
+                            on_round=lambda se, ph: live.publish(mcp, ph, se.turns, frame=int(ph[5:])))
         model_sheet = ctx.save_image(None, "model_sheet.png", imaging.zoom(imaging.load_rgba(ch["png"]), 6))
         pal_txt, _, _ = mcp.call("palette", {})
         stops = []
@@ -262,6 +265,7 @@ def draw(ctx):
             instr = prompts.ANIM_FRAME.format(name=ch["spec"].name, k1=k + 1, n=n, anim=spec.name, pose=fr.pose,
                                               start="the approved sprite" if k == 0 else f"frame {k} (the previous frame)",
                                               k=k, constant=", ".join(spec.constant) or "the design", turns=turns)
+            live.publish(mcp, f"frame{k}", sess.turns, frame=k)  # the frame as it starts (from the previous one)
             stop, _ = sess.converse(f"frame{k}", instr, content, turns, fresh=True)
             stops.append(stop)
             if sess.spent >= sess.max_usd:
@@ -275,6 +279,7 @@ def draw(ctx):
         if sess:
             sess.close()
         mcp.close()
+        live.clear()
 
 
 def _finish(ctx, doc):
@@ -284,12 +289,18 @@ def _finish(ctx, doc):
     strip = imaging.contact_sheet([imaging.from_bytes(doc.w, doc.h, d) for d in frames],
                                   [f"#{i + 1}" for i in range(doc.nframes)], 4)
     ctx.save_image("strip", "frames_strip.png", strip)
+    for i, d in enumerate(frames):  # one PNG per frame, for the app's frame row
+        ctx.save_image(f"frame{i}", f"frame_{i:02d}.png", imaging.from_bytes(doc.w, doc.h, d))
     from gif import encode_gif
     data, _ = encode_gif(doc.w * 4, doc.h * 4, [imaging.to_bytes(imaging.zoom(imaging.from_bytes(doc.w, doc.h, d), 4))
                                                for d in frames], doc.durations)
     with open(ctx.path("preview.gif"), "wb") as f:
         f.write(data)
     ctx.outputs["gif_x4"] = ctx.path("preview.gif")
+    data1, _ = encode_gif(doc.w, doc.h, frames, doc.durations)  # 1x: the app zooms it by whole numbers
+    with open(ctx.path("preview_1x.gif"), "wb") as f:
+        f.write(data1)
+    ctx.outputs["gif"] = ctx.path("preview_1x.gif")
     ctx.info["frame_lint"] = {k: v for k, v in lint["metrics"].items() if k != "areas"}
     ctx.info["frame_issues"] = [i["message"] for i in lint["issues"]]
 

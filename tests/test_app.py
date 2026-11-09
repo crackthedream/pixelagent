@@ -21,6 +21,9 @@ class AppServerTest(unittest.TestCase):
         cls.projects = os.path.join(cls.tmp, "projects")
         cls.patch = mock.patch.object(server, "SETTINGS_FILE", os.path.join(cls.tmp, "settings.json"))
         cls.patch.start()
+        cls.trash = os.path.join(cls.tmp, "trash")  # deletes go here, never to the real Recycle Bin
+        cls.env = mock.patch.dict(os.environ, {"PIXELAGENT_TRASH_DIR": cls.trash})
+        cls.env.start()
         server.save_settings({**server.default_settings(), "projects_dir": cls.projects, "backend": "dry_run"})
         cls.httpd = server.AppServer(("127.0.0.1", 0), server.Handler)
         cls.port = cls.httpd.server_address[1]
@@ -31,6 +34,7 @@ class AppServerTest(unittest.TestCase):
         cls.httpd.shutdown()
         cls.httpd.server_close()
         cls.patch.stop()
+        cls.env.stop()
         shutil.rmtree(cls.tmp, ignore_errors=True)
 
     # -- helpers
@@ -208,6 +212,128 @@ class AppServerTest(unittest.TestCase):
         server.LAST_SEEN[0] = 0
         self.get("/api/ping")
         self.assertGreater(server.LAST_SEEN[0], time.time() - 5)
+
+    def drive(self, pid, aid, pick=0):
+        """Approve every gate (picking the first concept) until the item is complete."""
+        for _ in range(8):
+            d = self.wait_idle(pid, aid)
+            g = d.get("gate_detail")
+            if not g:
+                return d
+            body = {"project": pid, "id": aid, "approve": True}
+            if g["kind"] == "concept":
+                body["pick"] = pick
+            self.ok(self.post("/api/decide", body))
+        self.fail("too many gates")
+
+    def test_character_from_a_reference_image(self):
+        import base64
+        from PIL import Image
+        import io
+        buf = io.BytesIO()
+        im = Image.new("RGBA", (80, 120), (255, 255, 255, 255))  # a figure on a plain background, like a real reference
+        im.paste((200, 60, 50, 255), (25, 15, 55, 105))
+        im.paste((240, 220, 190, 255), (32, 22, 48, 40))
+        im.save(buf, "PNG")
+        data_url = "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
+        pid = self.new_project("References")
+        aid = self.ok(self.post("/api/characters", {"project": pid, "reference": data_url, "prompt": "keep the red",
+                                                    "name": "Red Block"}))["id"]
+        d = self.wait_idle(pid, aid)
+        # before any concept exists, the reference is what the stage shows, and it is linked in the details
+        self.assertIsNotNone(d["reference"])
+        self.assertEqual(d["hero"], d["reference"])
+        self.assertEqual(self.get(d["reference"])[0], 200)
+        d = self.drive(pid, aid)
+        self.assertEqual(d["status"], "complete")
+
+    def test_animation_review_has_frames_and_a_1x_preview(self):
+        pid = self.new_project("Motion")
+        cid = self.ok(self.post("/api/characters", {"project": pid, "prompt": "a small knight"}))["id"]
+        self.assertEqual(self.drive(pid, cid)["status"], "complete")
+        aid = self.ok(self.post("/api/animations", {"project": pid, "character": cid, "prompt": "4-frame idle",
+                                                    "name": "idle", "frames": 4}))["id"]
+        d = self.wait_idle(pid, aid)
+        self.assertEqual(d["gate_detail"]["kind"], "poses")
+        self.ok(self.post("/api/decide", {"project": pid, "id": aid, "approve": True}))
+        d = self.wait_idle(pid, aid)
+        g = d["gate_detail"]
+        self.assertEqual(g["kind"], "animation")
+        self.assertTrue(g["image"].endswith("preview_1x.gif"), g["image"])
+        self.assertEqual(len(g["frames"]), 4)
+        self.assertTrue(all(f["ms"] for f in g["frames"]))
+        status, png = self.get(g["frames"][0]["url"])
+        self.assertEqual(status, 200)
+        self.assertEqual(png[1:4], b"PNG")
+        # redraw with a note keeps the poses and draws a new version of the frames
+        self.ok(self.post("/api/decide", {"project": pid, "id": aid, "approve": False, "note": "more bounce"}))
+        d = self.wait_idle(pid, aid)
+        self.assertIn("v002", d["gate_detail"]["image"])
+        d = self.drive(pid, aid)
+        self.assertEqual(d["status"], "complete")
+        self.assertEqual(self.asset(pid, cid)["animations"], [aid])
+
+    def test_rename_duplicate_and_delete_items(self):
+        pid = self.new_project("Manage")
+        proj = Project(os.path.join(self.projects, pid))
+        proj.new_asset("hero", {"prompt": "a hero"})
+        proj.new_asset("hero-walk", {"kind": "animation", "character": "hero", "prompt": "walk", "anim": "walk"})
+        self.ok(self.post("/api/item/rename", {"project": pid, "id": "hero", "name": "Brave Hero"}))
+        self.assertEqual(self.asset(pid, "hero")["name"], "Brave Hero")
+        self.assertEqual(self.post("/api/item/rename", {"project": pid, "id": "hero", "name": "  "})[0], 400)
+        # duplicate: a new item with its own id and a "copy" name; animations are not copied
+        new = self.ok(self.post("/api/item/duplicate", {"project": pid, "id": "hero"}))["id"]
+        self.assertEqual(new, "hero-copy")
+        d = self.asset(pid, new)
+        self.assertEqual((d["id"], d["name"]), ("hero-copy", "Brave Hero copy"))
+        self.assertEqual(d["animations"], [])
+        # deleting a character with animations needs an explicit yes, then both go to the trash
+        status, data = self.post("/api/item/delete", {"project": pid, "id": "hero"})
+        self.assertEqual(status, 400)
+        self.assertIn("animation", data["error"])
+        self.ok(self.post("/api/item/delete", {"project": pid, "id": "hero", "with_animations": True}))
+        ids = [i["id"] for i in self.ok(self.get("/api/assets?project=Manage"))["items"]]
+        self.assertEqual(ids, ["hero-copy"])
+        trashed = os.listdir(self.trash)
+        self.assertTrue(any(n.startswith("hero-walk-") for n in trashed), trashed)          # the animation
+        self.assertTrue(any(n.startswith("hero-") and not n.startswith(("hero-walk", "hero-copy"))
+                            for n in trashed), trashed)                                     # and the character
+        # a deleted item is a clean 404 for the app to explain
+        status, data = self.get("/api/asset?project=Manage&id=hero")
+        self.assertEqual((status, data.get("not_found")), (404, True))
+
+    def test_items_that_are_working_cannot_be_changed(self):
+        pid = self.new_project("Busy")
+        Project(os.path.join(self.projects, pid)).new_asset("runner", {"prompt": "x"})
+        stop = threading.Event()
+        t = threading.Thread(target=stop.wait, daemon=True)
+        t.start()
+        try:
+            with mock.patch.dict(server.JOBS.running, {(pid, "runner"): t}):
+                for path, extra in (("/api/item/rename", {"name": "Y"}), ("/api/item/duplicate", {}),
+                                    ("/api/item/delete", {})):
+                    status, data = self.post(path, {"project": pid, "id": "runner", **extra})
+                    self.assertEqual(status, 400, path)
+                    self.assertIn("finished working", data["error"])
+                self.assertEqual(self.post("/api/project/delete", {"project": pid})[0], 400)
+                self.assertEqual(self.post("/api/project/rename", {"project": pid, "name": "Other"})[0], 400)
+        finally:
+            stop.set()
+
+    def test_rename_and_delete_projects(self):
+        self.new_project("Old name")
+        self.new_project("Taken")
+        self.ok(self.post("/api/current", {"project": "Old name"}))
+        self.assertEqual(self.post("/api/project/rename", {"project": "Old name", "name": "Taken"})[0], 400)
+        self.assertEqual(self.post("/api/project/rename", {"project": "Old name", "name": ".."})[0], 400)
+        self.ok(self.post("/api/project/rename", {"project": "Old name", "name": "New name"}))
+        o = self.ok(self.get("/api/overview"))
+        self.assertIn("New name", o["projects"])
+        self.assertNotIn("Old name", o["projects"])
+        self.assertEqual(o["current"], "New name")  # the open project follows its new name
+        self.ok(self.post("/api/project/delete", {"project": "New name"}))
+        self.assertNotIn("New name", self.ok(self.get("/api/overview"))["projects"])
+        self.assertTrue(any(n.startswith("New name-") for n in os.listdir(self.trash)))
 
 
 class StoreSaveTest(unittest.TestCase):

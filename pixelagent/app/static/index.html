@@ -24,11 +24,17 @@
     <symbol id="i-photo" viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="14" rx="3"/><circle cx="9" cy="10" r="1.6"/><path d="m4.5 17.5 4.8-4.6 3.4 3 2.6-2.3 4.2 3.9"/></symbol>
     <symbol id="i-text" viewBox="0 0 24 24"><path d="M5 7h14M5 12h14M5 17h9"/></symbol>
     <symbol id="i-key" viewBox="0 0 24 24"><circle cx="8" cy="12" r="3.5"/><path d="M11.5 12H20M17 12v3M14.5 12v2"/></symbol>
+    <symbol id="i-sidebar" viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="14" rx="3"/><path d="M9.5 5v14M5.8 8.5h1.6M5.8 11h1.6"/></symbol>
+    <symbol id="i-more" viewBox="0 0 24 24"><circle cx="6" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="18" cy="12" r="1.4" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-pencil" viewBox="0 0 24 24"><path d="M15.5 5.5 18.5 8.5 9 18H6v-3z"/><path d="m13.5 7.5 3 3"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8.5" y="8.5" width="11" height="11" rx="2.5"/><path d="M15.5 8.5V6.5a2 2 0 0 0-2-2h-7a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h2"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4.5 7h15M10 4.5h4M6.5 7l.9 11.2a2 2 0 0 0 2 1.8h5.2a2 2 0 0 0 2-1.8L17.5 7"/><path d="M10.2 10.5v6M13.8 10.5v6"/></symbol>
   </defs>
 </svg>
 
-<div class="app">
-  <aside class="sidebar" aria-label="Navigation">
+<div class="app" id="app">
+  <div class="sidebar-scrim" id="sidebar-scrim"></div>
+  <aside class="sidebar" id="sidebar" aria-label="Navigation">
     <div class="brand"><span class="brand-mark" aria-hidden="true"></span>PixelAgent</div>
     <nav>
       <div class="side-head">Library</div>
@@ -57,6 +63,8 @@
   <div class="sheet" id="sheet" role="dialog" aria-modal="true"></div>
 </div>
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
+<div class="menu" id="menu" role="menu" hidden></div>
+<div class="alert-backdrop" id="alert-backdrop" hidden><div class="alert" id="alert" role="alertdialog" aria-modal="true"></div></div>
 
 <script src="/static/app.js"></script>
 </body>

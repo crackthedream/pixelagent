@@ -22,6 +22,7 @@ from ..config import resource_path
 from ..pipeline import Pipeline
 from ..schemas import CharacterSpec
 from ..store import Project
+from ..live import read_live
 
 STATIC = resource_path("pixelagent", "app", "static")
 SETTINGS_FILE = os.environ.get("PIXELAGENT_SETTINGS") or os.path.join(os.path.expanduser("~"), ".pixelagent", "settings.json")
@@ -45,6 +46,17 @@ STAGES = {
 }
 
 
+# which step's versions the app lists, and the image that represents each version
+VERSIONED = {"character": ("artist", ("preview",)), "animation": ("anim_draw", ("gif", "gif_x4"))}
+# rough upper-bound cost (USD, OpenAI mode, 96 px) of running again from each milestone; measured on real runs
+REDO_USD = {
+    "character": {"Plan": 0.02, "Concept": 0.20, "Pixel conversion": 1.10, "Drawing": 0.95, "Quality check": 0.02,
+                  "Your approval": 0.0, "Export": 0.0},
+    "animation": {"Plan": 0.01, "Poses": 0.07, "Frame traces": 1.50, "Drawing frames": 1.50, "Your approval": 0.0,
+                  "Export": 0.0},
+}
+
+
 def stage_status(statuses):
     if "failed" in statuses:
         return "failed"
@@ -61,7 +73,7 @@ def stage_status(statuses):
 
 def default_settings():
     return {"projects_dir": os.path.join(os.path.expanduser("~"), "Documents", "PixelAgent"),
-            "backend": "openai", "monthly_usd": 90.0, "sprite_height": 96, "current_project": None}
+            "backend": "openai", "monthly_usd": 90.0, "asset_usd": 3.0, "sprite_height": 96, "current_project": None}
 
 
 def load_settings():
@@ -84,8 +96,29 @@ def save_settings(s):
 
 
 def overrides(s):
-    return {"backend": {"mode": s["backend"]}, "budget": {"monthly_usd": float(s["monthly_usd"])},
+    # one monthly limit for everything in the projects folder, and a limit per item
+    return {"backend": {"mode": s["backend"]},
+            "budget": {"monthly_usd": float(s["monthly_usd"]), "max_usd_per_asset": float(s.get("asset_usd", 3.0)),
+                       "monthly_scope_dir": s["projects_dir"]},
             "style": {"sprite_height": int(s["sprite_height"])}}
+
+
+# upper-bound estimates (USD, OpenAI mode) shown before starting; from real runs: a 96-px character ~$1.15 with the
+# fresh face pass, 64 px ~$0.70; 128 px extrapolated. Animations: plan + pose sheet ~$0.10, ~$0.25 per drawn frame.
+ESTIMATES = {"character": {"64": 0.70, "96": 1.15, "128": 1.70}, "animation_base": 0.10, "animation_per_frame": 0.25}
+
+
+def spend_check(settings, pid=None, aid=None):
+    """Refuse to start paid work that a limit would stop anyway (test runs are free)."""
+    if settings.get("backend") == "dry_run":
+        return
+    from ..models import budget_problem
+    proj = Project(project_path(settings, pid), overrides(settings)) if pid else None
+    if proj is None:
+        return
+    problem = budget_problem(proj, aid)
+    if problem:
+        raise ValueError(problem[0].upper() + problem[1:] + ". Nothing was started.")
 
 
 def key_found():
@@ -176,13 +209,19 @@ def first_output(asset, pairs):
 
 def thumb_of(asset):
     if asset.state.inputs.get("kind") == "animation":
-        return first_output(asset, [("anim_export", "gif"), ("anim_draw", "gif_x4"), ("anim_traces", "base")])
-    return first_output(asset, [("export", "png"), ("artist", "preview"), ("polish", "preview"), ("concept", "concept"),
-                                ("concept", "candidate0")])
+        return first_output(asset, [("anim_export", "gif"), ("anim_draw", "gif"), ("anim_draw", "gif_x4"),
+                                    ("anim_traces", "base")])
+    out = first_output(asset, [("export", "png"), ("artist", "preview"), ("polish", "preview"), ("concept", "concept"),
+                               ("concept", "candidate0")])
+    if out:
+        return out
+    # nothing made yet: show the user's reference image, if they gave one
+    refs = [r for r in asset.state.inputs.get("references") or [] if os.path.exists(asset.path(r))]
+    return refs[0] if refs else None
 
 
-def asset_summary(settings, pid, proj, aid):
-    a = proj.asset(aid)
+def asset_summary(settings, pid, proj, aid, a=None):
+    a = a or proj.asset(aid)
     st = a.state
     kind = st.inputs.get("kind", "character")
     gate = None
@@ -218,9 +257,10 @@ def asset_summary(settings, pid, proj, aid):
 
 
 def asset_detail(settings, pid, proj, aid):
-    a = proj.asset(aid)
     pipe = Pipeline(proj, aid, mode="dry_run")  # only to read the step list; no model calls happen here
-    d = asset_summary(settings, pid, proj, aid)
+    # ONE read of state.json for the whole view: a run in progress may save between two reads
+    a = pipe.asset
+    d = asset_summary(settings, pid, proj, aid, a)
     recs = {s.name: a.state.steps.get(s.name) for s in pipe.steps}
     steps = []
     for label, names in STAGES[d["kind"]]:
@@ -258,11 +298,36 @@ def asset_detail(settings, pid, proj, aid):
             g["frames"] = [{"pose": fr["pose"], "ms": fr["duration_ms"]} for fr in plan["frames"]]
         elif gs.gate == "R":
             dr = a.state.steps["anim_draw"].outputs
-            g["image"] = file_url(pid, a, dr["gif_x4"])
+            g["image"] = file_url(pid, a, dr.get("gif") or dr["gif_x4"])  # 1x when available: the UI zooms by whole numbers
             g["strip"] = file_url(pid, a, dr["strip"])
             g["issues"] = a.state.steps["anim_draw"].info.get("frame_issues", [])
+            try:
+                with open(a.output("anim_plan", "plan"), encoding="utf-8") as f:
+                    ms = [fr["duration_ms"] for fr in json.load(f)["frames"]]
+            except (KeyError, OSError, ValueError):
+                ms = []
+            n = sum(1 for k in dr if re.fullmatch(r"frame\d+", k))
+            g["frames"] = [{"url": file_url(pid, a, dr[f"frame{i}"]), "ms": ms[i] if i < len(ms) else None}
+                           for i in range(n)]  # empty for animations drawn before per-frame PNGs: the UI shows the strip
         d["gate_detail"] = g
     d["hero"] = d["thumb"]
+    step, keys = VERSIONED[d["kind"]]
+    vers = []
+    for v in pipe.versions(step):
+        img = next((v["outputs"][k] for k in keys if k in v["outputs"]), None)
+        if img and os.path.exists(a.path(img)):
+            vers.append({"version": v["version"], "url": file_url(pid, a, img), "time": v["time"], "current": v["current"]})
+    d["versions"] = {"step": step, "items": vers}
+    test_mode = settings.get("backend") == "dry_run"
+    d["redo"] = {label: (0.0 if test_mode else usd) for label, usd in REDO_USD[d["kind"]].items()}
+    lv = read_live(a.dir, max_age=900) if d["running"] else None
+    if lv:  # the model is drawing right now: its current drawing (never the tracing layer)
+        meta, png = lv
+        d["live"] = {"url": file_url(pid, a, a.rel(png)) + f"&t={int(meta['updated'] * 1000)}",
+                     "step": meta.get("step"), "turn": meta.get("turn"), "frame": meta.get("frame"),
+                     "frames": meta.get("frames")}
+    refs = [r for r in a.state.inputs.get("references") or [] if os.path.exists(a.path(r))]
+    d["reference"] = file_url(pid, a, refs[0]) if refs else None
     exp = a.state.steps.get("anim_export" if d["kind"] == "animation" else "export")
     if exp and exp.status == "done":
         d["exports"] = [{"key": k, "label": _export_label(k), "url": file_url(pid, a, v) if not os.path.isdir(a.path(v)) else None,
@@ -291,7 +356,9 @@ def _short(info):
 
 # ------------------------------------------------------------------ actions
 
-def start_run(settings, pid, aid, **kw):
+def start_run(settings, pid, aid, check=True, **kw):
+    if check:
+        spend_check(settings, pid, aid)
     proj = Project(project_path(settings, pid), overrides(settings))
 
     def job(log):
@@ -315,6 +382,7 @@ def unique_id(proj, base):
 
 def create_character(settings, body):
     pid = body["project"]
+    spend_check(settings, pid)
     proj = Project(project_path(settings, pid), overrides(settings))
     name = (body.get("name") or "").strip()
     prompt = (body.get("prompt") or "").strip()
@@ -340,6 +408,7 @@ def create_character(settings, body):
 
 def create_animation(settings, body):
     pid = body["project"]
+    spend_check(settings, pid)
     proj = Project(project_path(settings, pid), overrides(settings))
     char = body["character"]
     proj.asset(char)
@@ -361,6 +430,10 @@ def decide(settings, body):
     g = pipe.pending_gate()
     if g is None:
         raise ValueError("nothing is waiting for your decision")
+    # approving the final sprite or animation only exports (free): never blocked, even at a limit
+    paid = not (body.get("approve") and g.gate in ("C", "R"))
+    if paid:
+        spend_check(settings, pid, aid)  # before changing anything
     if body.get("spec") and g.gate == "A":
         spec = CharacterSpec.model_validate(body["spec"])  # validates before writing
         with open(pipe.asset.output("intake", "spec"), "w", encoding="utf-8") as f:
@@ -371,6 +444,146 @@ def decide(settings, body):
         raise ValueError("say what should change")
     pick = body.get("pick")
     pipe.decide(approve, int(pick) if pick is not None else None, note)
+    start_run(settings, pid, aid, check=paid)
+    return {"ok": True}
+
+
+# ------------------------------------------------------------------ managing items and projects
+
+def _not_running(pid, aids):
+    if any(JOBS.is_running((pid, a)) for a in aids):
+        raise ValueError("wait until it has finished working" if len(aids) == 1
+                         else "wait until it and its animations have finished working")
+
+
+def animations_of(proj, aid):
+    return [x for x in proj.asset_ids() if x != aid and proj.asset(x).state.inputs.get("character") == aid]
+
+
+def _set_name(a, name):
+    """The name the library shows: the plan's name for characters (once there is a plan), the anim name for animations."""
+    if a.state.inputs.get("kind") == "animation":
+        a.state.inputs["anim"] = name
+        return
+    a.state.inputs["name"] = name
+    try:
+        p = a.output("intake", "spec")
+        with open(p, encoding="utf-8") as f:
+            spec = json.load(f)
+        spec["name"] = name
+        with open(p, "w", encoding="utf-8") as f:
+            json.dump(spec, f, indent=2, ensure_ascii=False)
+    except (KeyError, OSError, ValueError):
+        pass
+
+
+def rename_item(settings, body):
+    pid, aid = body["project"], body["id"]
+    name = (body.get("name") or "").strip()
+    if not name or len(name) > 80:
+        raise ValueError("give it a name (up to 80 characters)")
+    proj = Project(project_path(settings, pid), overrides(settings))
+    a = proj.asset(aid)
+    _not_running(pid, [aid])
+    _set_name(a, name)
+    a.save()
+    return {"ok": True}
+
+
+def duplicate_item(settings, body):
+    import shutil
+    pid, aid = body["project"], body["id"]
+    proj = Project(project_path(settings, pid), overrides(settings))
+    a = proj.asset(aid)
+    _not_running(pid, [aid])
+    label = asset_summary(settings, pid, proj, aid, a)["name"]
+    new = unique_id(proj, f"{aid}-copy")
+    shutil.copytree(a.dir, os.path.join(proj.root, "assets", new), ignore=shutil.ignore_patterns("live", "*.tmp"))
+    b = proj.asset(new)
+    b.state.id = new
+    _set_name(b, f"{label} copy")
+    b.save()
+    return {"id": new}
+
+
+def delete_item(settings, body):
+    from ..trash import send_to_trash
+    pid, aid = body["project"], body["id"]
+    proj = Project(project_path(settings, pid), overrides(settings))
+    a = proj.asset(aid)
+    anims = animations_of(proj, aid) if a.state.inputs.get("kind") != "animation" else []
+    if anims and not body.get("with_animations"):
+        raise ValueError(f"this character has {len(anims)} animation(s); confirm deleting them too")
+    _not_running(pid, [aid] + anims)
+    for x in anims + [aid]:  # animations first: a delete that stops halfway never leaves orphans
+        send_to_trash(proj.asset(x).dir)
+    return {"ok": True, "deleted": anims + [aid]}
+
+
+def _project_busy(pid):
+    with JOBS.lock:
+        return any(k[0] == pid and t.is_alive() for k, t in JOBS.running.items())
+
+
+def rename_project(settings, body):
+    pid, new = body["project"], (body.get("name") or "").strip()
+    src, dst = project_path(settings, pid), project_path(settings, new)
+    if not os.path.isdir(os.path.join(src, "assets")):
+        raise ValueError("no such project")
+    if new == pid:
+        return {"id": new}
+    if os.path.exists(dst):
+        raise ValueError("a project with that name already exists")
+    if _project_busy(pid):
+        raise ValueError("wait until everything in this project has finished working")
+    os.rename(src, dst)
+    if settings.get("current_project") == pid:
+        settings["current_project"] = new
+        save_settings(settings)
+    return {"id": new}
+
+
+def delete_project(settings, body):
+    from ..trash import send_to_trash
+    pid = body["project"]
+    path = project_path(settings, pid)
+    if not os.path.isdir(os.path.join(path, "assets")):
+        raise ValueError("no such project")
+    if _project_busy(pid):
+        raise ValueError("wait until everything in this project has finished working")
+    send_to_trash(path)
+    if settings.get("current_project") == pid:
+        settings["current_project"] = None
+        save_settings(settings)
+    return {"ok": True}
+
+
+def restore_version(settings, body):
+    pid, aid = body["project"], body["id"]
+    spend_check(settings, pid, aid)  # before changing anything
+    proj = Project(project_path(settings, pid), overrides(settings))
+    _not_running(pid, [aid])
+    pipe = Pipeline(proj, aid, mode="dry_run")
+    step = body.get("step")
+    if step not in (s for s, _ in VERSIONED.values()):
+        raise ValueError("versions can be restored for the sprite drawing and the animation frames only")
+    pipe.restore_version(step, int(body["version"]))
+    start_run(settings, pid, aid)  # the cheap later steps run again and stop at the approval
+    return {"ok": True}
+
+
+def redo_from(settings, body):
+    pid, aid, label = body["project"], body["id"], body.get("stage")
+    spend_check(settings, pid, aid)  # before changing anything
+    proj = Project(project_path(settings, pid), overrides(settings))
+    _not_running(pid, [aid])
+    pipe = Pipeline(proj, aid, mode="dry_run")
+    kind = pipe.asset.state.inputs.get("kind", "character")
+    names = dict(STAGES[kind]).get(label)
+    if not names:
+        raise ValueError("unknown stage")
+    first = next((n for n in names if n in {s.name for s in pipe.steps}), None)
+    pipe.reset_from(first)
     start_run(settings, pid, aid)
     return {"ok": True}
 
@@ -463,12 +676,12 @@ class Handler(BaseHTTPRequestHandler):
             if u.path == "/api/overview":
                 projects = list_projects(s)
                 cur = s.get("current_project") if s.get("current_project") in projects else (projects[0] if projects else None)
-                spent = 0.0
-                for p in projects:
-                    spent += Project(project_path(s, p)).cost_total(month=True)
+                from ..store import month_spend_all
+                spent = month_spend_all(s["projects_dir"])
                 return self._json({"projects": projects, "current": cur, "settings": {
-                    "backend": s["backend"], "monthly_usd": s["monthly_usd"], "sprite_height": s["sprite_height"],
-                    "projects_dir": s["projects_dir"], "key_found": key_found()}, "month_spent": round(spent, 2)})
+                    "backend": s["backend"], "monthly_usd": s["monthly_usd"], "asset_usd": s.get("asset_usd", 3.0),
+                    "sprite_height": s["sprite_height"], "projects_dir": s["projects_dir"], "key_found": key_found()},
+                    "month_spent": round(spent, 2), "estimates": ESTIMATES})
             if u.path == "/api/assets":
                 proj = Project(project_path(s, q["project"]))
                 items = [asset_summary(s, q["project"], proj, aid) for aid in proj.asset_ids()]
@@ -476,6 +689,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"items": items})
             if u.path == "/api/asset":
                 proj = Project(project_path(s, q["project"]))
+                if q["id"] not in proj.asset_ids():  # deleted, or it belongs to another project
+                    return self._json({"error": "not found", "not_found": True}, 404)
                 return self._json(asset_detail(s, q["project"], proj, q["id"]))
             return self.send_error(404)
         except (KeyError, ValueError, FileNotFoundError) as e:
@@ -518,19 +733,42 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"ok": True})
             if u.path == "/api/open":
                 return self._json(open_item(s, body))
+            if u.path == "/api/versions/restore":
+                return self._json(restore_version(s, body))
+            if u.path == "/api/redo":
+                return self._json(redo_from(s, body))
+            if u.path == "/api/item/rename":
+                return self._json(rename_item(s, body))
+            if u.path == "/api/item/duplicate":
+                return self._json(duplicate_item(s, body))
+            if u.path == "/api/item/delete":
+                return self._json(delete_item(s, body))
+            if u.path == "/api/project/rename":
+                return self._json(rename_project(s, body))
+            if u.path == "/api/project/delete":
+                return self._json(delete_project(s, body))
+            if u.path == "/api/project/open":
+                path = project_path(s, body["project"])
+                if not os.path.isdir(path):
+                    raise ValueError("no such project")
+                os.startfile(path) if os.name == "nt" else subprocess.Popen(["xdg-open", path])
+                return self._json({"ok": True})
             if u.path == "/api/settings":
-                for k in ("backend", "monthly_usd", "sprite_height", "projects_dir"):
+                for k in ("backend", "monthly_usd", "asset_usd", "sprite_height", "projects_dir"):
                     if k in body and body[k] not in (None, ""):
                         s[k] = body[k]
                 if s["backend"] not in ("openai", "dry_run"):
                     raise ValueError("unknown backend")
                 try:
                     s["monthly_usd"] = float(s["monthly_usd"])
+                    s["asset_usd"] = float(s.get("asset_usd", 3.0))
                     s["sprite_height"] = int(s["sprite_height"])
                 except (TypeError, ValueError):
                     raise ValueError("the monthly limit and height must be numbers")
                 if not (0 < s["monthly_usd"] <= 10000) or s["sprite_height"] not in (64, 96, 128):
                     raise ValueError("choose a monthly limit above 0 and a height of 64, 96 or 128 px")
+                if not (0.5 <= s["asset_usd"] <= 100):
+                    raise ValueError("choose a limit per item between $0.50 and $100")
                 if body.get("api_key"):
                     set_api_key(body["api_key"].strip())
                 save_settings(s)

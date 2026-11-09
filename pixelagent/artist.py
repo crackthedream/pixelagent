@@ -135,13 +135,15 @@ def face_region(labels, w, h, opaque=None):
 
 def run_artist(project, asset_id, reference, height=64, client=None, model=None, max_usd=3.0, max_turns=60,
                effort="medium", log=print, trace=None, palette=None, out_dir=None, start_project=None,
-               phases=("draw", "face"), face=None, concept_face=None, face_turns=12, notes=None):
+               phases=("draw", "face"), face=None, concept_face=None, face_turns=12, notes=None,
+               live=None):
     """reference: concept image the model sees. trace (hybrid mode): an image already on the sprite grid (e.g. the
     pipeline's cleaned sprite) used 1:1 as the tracing layer instead of a downscaled reference; palette: colours
     ({name: hex} or [hex]) loaded into the canvas palette with single-character keys.
     start_project: continue from a saved project (its reference layer stays the trace) instead of a new canvas.
     phases: "draw" (the main drawing) and/or "face" (focused face pass; needs face=(x, y, w, h); concept_face is a
-    high-resolution crop of the concept's face shown to the model)."""
+    high-resolution crop of the concept's face shown to the model).
+    live: a LivePreview that receives the drawing after every round (the app shows it while the model works)."""
     cfg = project.config
     engine = load_engine(cfg)
     out = out_dir or os.path.join(project.root, "artist", asset_id)
@@ -199,7 +201,8 @@ def run_artist(project, asset_id, reference, height=64, client=None, model=None,
                 if err:
                     raise RuntimeError(f"setup {name} failed: {txt}")
         sess = AgentSession(project, asset_id, mcp, client, model, out, effort=effort, allowed=ALLOWED_TOOLS,
-                            max_usd=max_usd, log=log)
+                            max_usd=max_usd, log=log,
+                            on_round=(lambda se, ph: live.publish(mcp, ph, se.turns)) if live else None)
         img = sess.image_item
 
         pal_txt, _, _ = mcp.call("palette", {})
@@ -234,7 +237,9 @@ def run_artist(project, asset_id, reference, height=64, client=None, model=None,
             if concept_face and os.path.exists(concept_face):
                 content.append(img(concept_face))
             instructions = FACE_INSTRUCTIONS.format(height=height, fx=fx, fy=fy, fw=fw, fh=fh, w=W, h=H, turns=face_turns)
-            stops["face"], finishes["face"] = sess.converse("face", instructions, content, face_turns)
+            # fresh conversation, as in the face-pass benchmark: its instructions and images stand alone, while carrying
+            # the whole drawing conversation along re-sent ~30 rounds of images per call ($0.51 vs ~$0.05-0.08)
+            stops["face"], finishes["face"] = sess.converse("face", instructions, content, face_turns, fresh=True)
 
         png_path = os.path.join(out, f"{asset_id}.png")
         mcp.call("export", {"path": png_path})
@@ -257,6 +262,8 @@ def run_artist(project, asset_id, reference, height=64, client=None, model=None,
         if sess:
             sess.close()
         mcp.close()
+        if live:
+            live.clear()
 
 
 def palette_args(palette):

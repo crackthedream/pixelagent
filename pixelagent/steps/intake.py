@@ -29,6 +29,8 @@ def run(ctx):
         spec.height_px = int(style["sprite_height"])
     if inp.get("view"):
         spec.view = inp["view"]
+    if inp.get("name"):  # a name the user typed is theirs; the director only names unnamed characters
+        spec.name = inp["name"]
     p = ctx.save_json("spec", "spec.json", spec)
     ctx.info["edit_hint"] = f"edit {os.path.basename(p)} before approving gate A to change the spec"
     ctx.info["summary"] = f"{spec.name}: {spec.height_px}px {spec.view} {spec.asset_type}, {len(spec.materials)} materials"

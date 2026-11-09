@@ -3,8 +3,10 @@
 Reference image or concept prompt → layered, palette-clean pixel-art sprite, built on the PixelLiner MCP
 engine (`~/pixelliner-mcp`). Output opens in PixelLiner for final touch-up.
 
-**Status: M1 in progress.** The pipeline runs end to end with stub models (`--dry-run`, no API calls) or
-with OpenAI models (`[backend] mode = "openai"`). Detail/repair agents arrive in M2, animation in M3.
+**Status:** characters (prompt or reference image) and prompt-driven animations work end to end with OpenAI
+models, drawn by the model through MCP; a desktop app (`PixelAgent.exe`) covers the whole flow. Every step also
+runs with stub models (`--dry-run` / Test run, no API calls, no cost). Next steps and the full picture for a new
+developer: [`docs/HANDOFF.md`](docs/HANDOFF.md).
 
 ## API key (OpenAI mode)
 Set it yourself as a user environment variable, never in a file:
@@ -48,17 +50,19 @@ python -m pixelagent --project D:/pixel_projects/mygame export hero --open     #
 | # | Step | Kind | Main output |
 |---|---|---|---|
 | 1 | intake | model (director) → **gate A** | `spec.json` (CharacterSpec; edit before approving) |
-| 2 | concept | reference cleanup / image model → **gate B** | `concept.png` (background removed, cropped) |
-| 3 | pixelize | code + model pick | grid-alignment candidates → `pixel_base.png` |
-| 4 | materials | code + model labels | colour clusters → materials → hue-shifted ramps within the colour budget |
-| 5 | rebuild | code | per-material layers, shading transferred from the concept (relative lightness) |
-| 6 | lines | code | pixel-perfect outline + sel-out, in a `lines` overlay layer |
-| 7 | detail | agent (M2) | skipped in M0 |
-| 8 | polish | code | AA restricted to the two meeting ramps, stray-pixel cleanup, `polish` overlay layer |
-| 9 | critique | lint + model critic | `lint.json`, `critique.json` (repair loop is M2) |
-| 10 | review | **gate C** | you approve or reject |
-| 11 | animate | M3 | skipped in M0 |
-| 12 | export | code | `<name>.png`, `_x4.png`, per-layer PNGs, engine project, `meta.json` (palette, pivot, frames) |
+| 2 | concept | reference cleanup / image model → **gate B** | `concept.png` (background removed, cropped); with a reference image there is no choice to make |
+| 3 | matmap | image model + checks | flat key-colour material map of the concept (silhouette IoU ≥ 0.85) |
+| 4 | pixelize | code + model pick | grid-alignment candidates → `pixel_base.png` |
+| 5 | materials | code + model labels | colour clusters → materials → colour families → hue-shifted ramps within the colour budget |
+| 6 | rebuild | code | per-material layers, shading transferred from the concept (relative lightness) |
+| 7 | lines | code | pixel-perfect outline + sel-out, in a `lines` overlay layer |
+| 8 | detail | agent | only in `[finish] mode = "repair"`; skipped in the default artist mode |
+| 9 | polish | code | AA restricted to the two meeting ramps, stray-pixel cleanup → the **trace** |
+| 10 | artist | agent via MCP | the model draws the final sprite over the trace, then a face pass |
+| 11 | critique | lint + model critic | `lint.json`, `critique.json` (evaluation only) |
+| 12 | review | **gate C** | approve, or reject with a note to redraw from the artist step |
+| 13 | animate | — | always skipped: animations are their own assets (see Animation) |
+| 14 | export | code | `<name>.png`, `_x4.png`, per-layer PNGs, engine project, `meta.json` (palette, pivot) |
 
 Every step writes `assets/<id>/steps/NN_step/vNNN/`; nothing is overwritten. Each model call is logged to
 `costs.jsonl`, and `[budget] max_usd_per_asset` stops a run that exceeds it.
@@ -134,15 +138,24 @@ config.toml            engine path, backend mode, model per role, budgets, style
 pixelagent/
   cli.py               commands
   pipeline.py          runner: steps, gates, versions, resume, rerun-from
-  steps/               intake, concept, pixelize, materials, build (rebuild/lines/polish), critique, later, export
-  models.py            backend interfaces + dry-run stubs (OpenAI backend: M1)
+  steps/               intake, concept, matmap, pixelize, materials, build (rebuild/lines/polish), detail,
+                       artist_step, critique, anim (animation pipeline), later, export
+  models.py            backend interfaces + dry-run stubs
+  openai_backend.py    OpenAI Responses (structured outputs, tool loops) and Images API, cost logging
+  agent_session.py     tool loop shared by the artist and the animator
+  artist.py            the artist agent: draws through MCP, face pass
+  mcp_client.py        MCP client over stdio for the pixelliner engine
+  regions.py, judge.py region rewrites (repair mode), pairwise judging
   prompts.py           model instructions
   schemas.py           CharacterSpec, Pick, MaterialLabels, Critique, state (pydantic)
   imaging.py           background removal, linear-light pixelize with grid offsets, contact sheets
   store.py             project / asset folders, versions, cost log
   review.py            HTML review page
   synth.py             procedural stand-in concepts for dry runs
-benchmarks/            cases.csv, refs/, ratings.csv, run.py
+  app/                 desktop app: server.py (local JSON API) + static/ (UI)
+packaging/             PyInstaller spec, build.ps1, icon
+benchmarks/            cases.csv, refs/, ratings.csv, run.py, artist_run.py, face_pass.py
+docs/HANDOFF.md        status, decisions and remaining work
 tests/                 python -m unittest discover -s tests -v
 ```
 
@@ -155,7 +168,6 @@ The stub labeller groups colour clusters by hue, so it sometimes merges material
 and small features like eyes can lose their colour. Real labelling (M1) and the detail pass (M2) are what fix
 these; the dry run exists to exercise the plumbing.
 
-## Before M1
-- Your Pro tier (sets monthly API credit: $100 / $200 / $500), and the OpenAI API org linked to it.
-- Typical sprite height(s).
-- ~10 references + ~10 prompts in `benchmarks/` (see benchmarks/README.md).
+## Still open
+- About 10 reference images in `benchmarks/refs` to measure the reference path as well as the prompt path.
+- The full prioritized list is in [`docs/HANDOFF.md`](docs/HANDOFF.md#13-remaining-work-in-priority-order).

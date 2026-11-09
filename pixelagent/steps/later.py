@@ -9,4 +9,5 @@ def detail(ctx):
 def animate(ctx):
     ctx.skipped = True
     anims = ctx.spec().animations
-    ctx.info["reason"] = ("animation arrives in milestone M3" + (f"; requested: {anims}" if anims else "; none requested"))
+    ctx.info["reason"] = ("animations are separate assets: create one from the finished character"
+                          + (f" (requested in the plan: {anims})" if anims else ""))
