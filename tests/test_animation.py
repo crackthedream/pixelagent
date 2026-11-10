@@ -98,7 +98,7 @@ class AnimationTests(unittest.TestCase):
     def test_reduce_frames_are_the_pose_sheet_reductions(self):
         # the reduce finish (default): no drawing; each frame is its pose-sheet figure reduced onto the character's
         # grid and palette, with no outline ring
-        self.assertEqual(self.proj.config["finish"]["mode"], "reduce")
+        self.assertIn(self.proj.config["finish"]["mode"], ("reduce", "native"))   # both animate from the sheet
         pipe = self._anim("hero-wave", "wave", 4)
         self.assertEqual(pipe.run(auto_approve=True, log=quiet), "complete")
         a = self.proj.asset("hero-wave")

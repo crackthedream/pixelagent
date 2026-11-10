@@ -127,8 +127,8 @@ class PipelineTests(Base):
         return im, data, res
 
     def test_reference_dry_run_auto(self):
-        # the default finish: the reduction is the sprite (soft look, docs/FACE_ROOT_CAUSE.md)
-        self.assertEqual(self.proj.config["finish"]["mode"], "reduce")
+        # the reduce finish: the reduction is the sprite (docs/FACE_ROOT_CAUSE.md section 4)
+        self.proj.config["finish"]["mode"] = "reduce"
         self.proj.new_asset("hero", {"references": [self.ref], "height": 48})
         status = Pipeline(self.proj, "hero").run(auto_approve=True, log=quiet)
         self.assertEqual(status, "complete")
@@ -163,6 +163,53 @@ class PipelineTests(Base):
         self.assertEqual({c["role"] for c in calls if c["kind"] == "llm"}, {"director", "vision_pick", "critic"})
         self.assertTrue(os.path.exists(os.path.join(a.dir, "review", "index.html")))
 
+    def test_native_finish_reads_the_pixel_art_concept_back_exactly(self):
+        # the default finish: the image model draws the sprite as crisp blocks (a test run's stand-in does the same
+        # with a synthetic character); pixelize reads it back pixel for pixel, rebuild keeps 3-6 tones per material
+        from pixelagent import synth
+        self.assertEqual(self.proj.config["finish"]["mode"], "native")
+        self.proj.new_asset("pix", {"references": [self.ref], "height": 48})
+        self.assertEqual(Pipeline(self.proj, "pix").run(auto_approve=True, log=quiet), "complete")
+        a = self.proj.asset("pix")
+        st = a.state.steps
+        self.assertEqual(st["concept"].info["sources"], ["pixel sprite"])
+        self.assertEqual(st["pixelize"].info["grid"]["p"], 8.0)                 # the block size drawn
+        im, _ = synth.draw_character(seed=0, background=None)
+        want = imaging.pixelize(im, 48, margin=0)
+        got = imaging.load_rgba(a.output("pixelize", "pixel_base"))
+        got = got.crop(got.getbbox())
+        self.assertEqual(got.size, want.size)
+        ga, wa = imaging.to_bytes(got), imaging.to_bytes(want)
+        diff = [abs(ga[k] - wa[k]) for k in range(0, len(ga)) if k % 4 != 3 and ga[k - k % 4 + 3] and wa[k - k % 4 + 3]]
+        self.assertLessEqual(max(diff), 3)                                       # pixel for pixel
+        self.assertTrue(all(1 <= k <= 6 for k in st["rebuild"].info["colors_per_material"].values()))   # 3-6 (fewer if a material has fewer colours)
+        self.assertEqual(st["rebuild"].info["mode"], "native")
+        self.assertEqual((st["lines"].status, st["detail"].status), ("skipped", "skipped"))
+        oc = self.proj.config["style"]["outline_color"]
+        oc = tuple(int(oc[i:i + 2], 16) for i in (1, 3, 5))
+        data = imaging.to_bytes(imaging.load_rgba(a.output("export", "png")))
+        self.assertNotIn(oc, {tuple(data[k:k + 3]) for k in range(0, len(data), 4) if data[k + 3]})
+
+    def test_native_area_revision_keeps_the_grid_and_the_rest(self):
+        self.proj.new_asset("pix", {"references": [self.ref], "height": 48})
+        self.assertEqual(Pipeline(self.proj, "pix").run(auto_approve=True, log=quiet), "complete")
+        a = self.proj.asset("pix")
+        before = imaging.to_bytes(imaging.load_rgba(a.output("artist", "preview")))
+        grid = a.state.steps["pixelize"].info["grid"]
+        pipe = Pipeline(self.proj, "pix")
+        self.assertEqual(pipe.request_fix("a red bow", (8, 8, 6, 6)), "concept")
+        pipe.reset_from("concept")
+        self.assertEqual(Pipeline(self.proj, "pix").run(log=quiet), "awaiting_gate")      # straight to review
+        a = self.proj.asset("pix")
+        self.assertEqual(a.state.steps["pixelize"].info["grid"], grid)
+        after = imaging.to_bytes(imaging.load_rgba(a.output("artist", "preview")))
+        self.assertEqual(len(after), len(before))
+        w = imaging.load_rgba(a.output("artist", "preview")).width
+        for k in range(0, len(after), 4):
+            x, y = (k // 4) % w, (k // 4) // w
+            if not (8 <= x < 14 and 8 <= y < 14):
+                self.assertEqual(after[k:k + 4], before[k:k + 4], (x, y))
+
     def test_reduce_keeps_dark_lines_and_eye_highlights(self):
         import numpy as np
         from pixelagent.steps.build import is_focal, reduce_material
@@ -178,6 +225,33 @@ class PipelineTests(Base):
         self.assertLess(min(lum(c) for c in used), lum(dark.mean(0)) + 8)        # the pupil stays near-black
         self.assertGreater(max(lum(c) for c in used), lum(light.mean(0)) - 8)    # the catchlight stays bright
         self.assertTrue(is_focal("eye_irises") and is_focal("mouth") and not is_focal("hair"))
+
+    def test_reduce_revision_edits_the_concept_and_keeps_the_rest(self):
+        self.proj.config["finish"]["mode"] = "reduce"
+        self.proj.new_asset("hero", {"references": [self.ref], "height": 48})
+        self.assertEqual(Pipeline(self.proj, "hero").run(auto_approve=True, log=quiet), "complete")
+        a = self.proj.asset("hero")
+        before = imaging.to_bytes(imaging.load_rgba(a.output("artist", "preview")))
+        offsets = a.state.steps["pixelize"].info["offsets"]
+        pipe = Pipeline(self.proj, "hero")
+        self.assertEqual(pipe.request_fix("make the bow red", (10, 10, 6, 6)), "concept")
+        pipe.reset_from("concept")
+        self.assertEqual(Pipeline(self.proj, "hero").run(log=quiet), "awaiting_gate")   # straight to the review (C)
+        a = self.proj.asset("hero")
+        st = a.state.steps
+        self.assertEqual(Pipeline(self.proj, "hero").pending_gate().gate, "C")
+        self.assertEqual((st["concept"].version, st["concept"].info["sources"]), (2, ["revised"]))
+        self.assertEqual(st["pixelize"].info["offsets"], offsets)                 # the same grid
+        self.assertIn("previous grid", st["pixelize"].info["reason"])
+        self.assertNotIn("proportions", st["materials"].info)                     # no proportion retry
+        self.assertEqual(st["artist"].info["revised"]["via"], "concept")
+        self.assertNotIn("concept_fix", a.state.inputs)
+        after = imaging.to_bytes(imaging.load_rgba(a.output("artist", "preview")))
+        w = imaging.load_rgba(a.output("artist", "preview")).width
+        for k in range(0, len(after), 4):                                         # outside the area: identical
+            x, y = (k // 4) % w, (k // 4) // w
+            if not (10 <= x < 16 and 10 <= y < 16):
+                self.assertEqual(after[k:k + 4], before[k:k + 4], (x, y))
 
     def test_artist_finish_dry_run(self):
         # the drawing finish (classic): ramp palette, outline ring, polish; a stub model passes the trace through

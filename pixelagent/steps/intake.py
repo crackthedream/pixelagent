@@ -30,7 +30,7 @@ def run(ctx):
     if spec.asset_type == "character" and style.get("look") == "soft" and not inp.get("keep_proportions"):
         spec.heads_tall = float(style.get("heads_tall", 4.5))   # the look sets the proportions (editable at gate A)
         spec.outline = "soft"
-    if ctx.cfg.get("finish", {}).get("mode") == "reduce":
+    if ctx.cfg.get("finish", {}).get("mode") in ("reduce", "native"):
         # the reduce finish keeps soft shading: its colour budget is the reduction's, not the ramp palette's
         spec.max_colors = int(ctx.cfg["finish"].get("reduce_colors", 96))
     if inp.get("view"):

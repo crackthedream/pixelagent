@@ -40,7 +40,8 @@ def character(ctx):
 
 def reduce_mode(ctx):
     """The reduce finish (soft look): frames are the pose sheet's own reductions, like the character itself."""
-    return ctx.cfg.get("finish", {}).get("mode") == "reduce"
+    # native characters animate through the same path for now (a pixel-art pose sheet is a later step)
+    return ctx.cfg.get("finish", {}).get("mode") in ("reduce", "native")
 
 
 def load_plan(ctx):

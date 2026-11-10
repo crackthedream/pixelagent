@@ -383,6 +383,7 @@ function inspector(d) {
   const facts = [["Spent", `$${(d.cost || 0).toFixed(2)}`]];
   if (d.inputs.height) facts.push(["Height", `${d.inputs.height} px`]);
   if (d.inputs.frames) facts.push(["Frames", d.inputs.frames]);
+  if (d.proportions) facts.push(["Proportions", `${Number(d.proportions.heads_tall).toFixed(1)} heads tall${d.proportions.retries ? ` <span class="muted">(concept redone ${d.proportions.retries === 1 ? "once" : d.proportions.retries + " times"} to fit)</span>` : ""}`]);
   if (d.reference) facts.push(["Reference", `<a class="link" href="${esc(d.reference)}" target="_blank" rel="noopener">View image</a>`]);
   if (d.character) facts.push(["Character", `<a class="link" href="#/item/${encodeURIComponent(d.character)}">${esc(d.character_name || "Open")}</a>`]);
   let html = `<div class="card"><h2>Progress</h2><ol class="steps">${steps}</ol>
@@ -768,11 +769,13 @@ function renderSettings() {
     <div class="group">
       <div class="setting"><div class="grow">Mode<div class="muted">Test runs use stand-in models: no cost, placeholder pictures.</div></div>
         <div class="segmented" id="st-mode">${[["openai", "OpenAI"], ["dry_run", "Test run"]].map(([v, l]) => `<button data-v="${v}" aria-pressed="${s.backend === v}">${l}</button>`).join("")}</div></div>
-      <div class="setting"><div class="grow">Default height<div class="muted">96 px keeps faces readable.</div></div>
+      <div class="setting"><div class="grow">Look<div class="muted">Soft: big-headed anime game sprites with soft shading, made straight from the concept (about $0.25 a character). Classic: strict palette and outlines, drawn by the model (about $1.50).</div></div>
+        <div class="segmented" id="st-look">${[["soft", "Soft"], ["classic", "Classic"]].map(([v, l]) => `<button data-v="${v}" aria-pressed="${(s.look || "soft") === v}">${l}</button>`).join("")}</div></div>
+      <div class="setting"><div class="grow">Default height<div class="muted">160 px gives faces enough pixels.</div></div>
         <div class="segmented" id="st-h">${[64, 96, 128, 160].map((v) => `<button data-v="${v}" aria-pressed="${Number(s.sprite_height) === v}">${v} px</button>`).join("")}</div></div>
       <div class="setting"><div class="grow">Monthly limit<div class="muted">For all projects together. Work stops when it is reached (estimated spend).</div></div>
         <label class="affix"><span>US$</span><input class="input" id="st-cap" type="number" min="1" step="1" value="${esc(s.monthly_usd)}" aria-label="Monthly limit in US dollars"></label></div>
-      <div class="setting"><div class="grow">Limit per item<div class="muted">One character or animation, including redraws. A character costs about $1.15.</div></div>
+      <div class="setting"><div class="grow">Limit per item<div class="muted">One character or animation, including redraws. A character costs about $${characterEstimate(s.sprite_height).toFixed(2)}.</div></div>
         <label class="affix"><span>US$</span><input class="input" id="st-item" type="number" min="0.5" step="0.5" value="${esc(s.asset_usd)}" aria-label="Limit per item in US dollars"></label></div>
     </div>
     <div class="group-title">Storage</div>
@@ -784,7 +787,7 @@ function renderSettings() {
   </div>`;
   wireSegmented($("#content"));
   $("#st-save").onclick = () => act(() => api("/api/settings", {
-    backend: segmentedValue($("#st-mode")), sprite_height: Number(segmentedValue($("#st-h"))),
+    backend: segmentedValue($("#st-mode")), sprite_height: Number(segmentedValue($("#st-h"))), look: segmentedValue($("#st-look")),
     monthly_usd: Number($("#st-cap").value), asset_usd: Number($("#st-item").value), projects_dir: $("#st-dir").value.trim(),
   }), "Settings saved");
   $("#st-key-save").onclick = async () => {

@@ -83,7 +83,9 @@ image_input = 8.0
 output = 30.0
 
 [finish]
-mode = "reduce"              # "reduce": the final sprite is the concept's own reduction with per-material colours
+mode = "native"              # "native": the image model draws the character AS a hand-pixelled sprite (crisp blocks),
+                             # read back pixel for pixel, 3-6 tones per material (docs/FACE_ROOT_CAUSE.md section 7).
+                             # "reduce": the final sprite is the concept's own reduction with per-material colours
                              # (the soft look; faces and shading stay as the image model drew them, no model redraw;
                              # see docs/FACE_ROOT_CAUSE.md). "artist": the model redraws the sprite over the
                              # conversion via MCP (+ face pass). "repair": older region rewrites + critic repairs.

@@ -32,7 +32,123 @@ def reference_usable(path):
     return bool(cover <= 0.6 and edges <= 0.05), {"figure_cover": round(cover, 3), "edge_cover": round(float(edges), 3)}
 
 
+def _revise(ctx, fix):
+    """A revision of a finished character (reduce finish): the approved concept is edited with the note -- inside the
+    area only when one was given (masked edit, then only that area is taken back, so nothing else can move) -- and
+    becomes the concept again without another approval (the user asked for the change)."""
+    import json
+
+    from PIL import Image
+    base = imaging.load_rgba(ctx.asset.path(fix["from_concept"]))
+    bw, bh = base.size
+    W, H = (int(v) for v in ctx.cfg.get("images", {}).get("draft_size", "1024x1536").split("x"))
+    native = ctx.cfg.get("finish", {}).get("mode") == "native"
+    if native:   # a pixel-art concept is sent as it is: any scaling would blur its blocks
+        W, H = bw, bh
+    k = 1.0 if native else min(W * 0.92 / bw, H * 0.92 / bh)
+    sw, sh = max(1, round(bw * k)), max(1, round(bh * k))
+    ox, oy = (W - sw) // 2, (H - sh) // 2
+    canvas = Image.new("RGBA", (W, H), (222, 222, 226, 255))
+    canvas.alpha_composite(base if native else base.resize((sw, sh), Image.LANCZOS), (ox, oy))
+    src = ctx.path("revise_source.png")
+    canvas.convert("RGB").save(src)
+    mask, cbox = None, None
+    if fix.get("box") and fix.get("geom"):
+        g = fix["geom"]
+        x, y, w, h = fix["box"]
+        m, s = g["margin"], g["s"]
+        X0 = g["gx0"] + (x - 1 - m + g["crop"][0]) * s
+        Y0 = g["gy0"] + (y - 1 - m + g["crop"][1]) * s
+        X1 = g["gx0"] + (x + w + 1 - m + g["crop"][0]) * s
+        Y1 = g["gy0"] + (y + h + 1 - m + g["crop"][1]) * s
+        cbox = (max(0, int(X0)), max(0, int(Y0)), min(bw, int(X1 + 1)), min(bh, int(Y1 + 1)))
+        mk = Image.new("RGBA", (W, H), (255, 255, 255, 255))
+        hole = Image.new("RGBA", (round((cbox[2] - cbox[0]) * k), round((cbox[3] - cbox[1]) * k)), (0, 0, 0, 0))
+        mk.paste(hole, (ox + round(cbox[0] * k), oy + round(cbox[1] * k)))
+        mask = ctx.path("revise_mask.png")
+        mk.save(mask)
+    scope = "Change only the part of the image inside the transparent area of the mask.\n" if mask else ""
+    prompt = prompts.REVISE_CONCEPT.format(note=fix["note"], scope=scope)
+    with open(ctx.path("concept_prompt.txt"), "w", encoding="utf-8") as f:
+        f.write(prompt)
+    out = ctx.backend.images.generate("image_final", prompt, 1, ctx.path("generated"), [src],
+                                      lambda n, d: [shutil.copyfile(src, f"{d}/gen00.png") or f"{d}/gen00.png"],
+                                      mask=mask)
+    edited = imaging.load_rgba(out[0])
+    if edited.size != (W, H):
+        edited = edited.resize((W, H), Image.NEAREST if native else Image.LANCZOS)
+    if cbox:
+        back = edited.crop((ox, oy, ox + sw, oy + sh)).resize((bw, bh), Image.NEAREST if native else Image.LANCZOS)
+        if not native:   # a pixel-art concept keeps its flat background (pixelize cuts it away)
+            back = imaging.remove_background(back)
+        result = base.copy()
+        result.paste(back.crop(cbox), cbox[:2])           # only the area changes: the rest is the approved concept
+    elif native:
+        result = edited                         # the whole edited pixel-art sheet (same size, crisp blocks)
+    else:
+        result = _clean(out[0])
+    ctx.save_image("candidate0", "concept_00.png", result)
+    ctx.outputs["concept"] = ctx.save_image("concept", "concept.png", result)
+    ctx.info.update(candidates=1, sources=["revised"], suggested=0, picked=0,
+                    revised={"note": fix["note"], "box": fix.get("box")})
+    ctx.needs_gate = False
+    fix["concept_done"] = True
+    json.dumps(fix)  # stays JSON-serialisable in the asset state
+
+
+BLOCK = 8   # image pixels per sprite pixel asked of the image model (160 px * 8 = 1280 px, fits 1024x1536)
+
+
+def _native_stub(ctx, spec):
+    """Test runs: a synthetic character reduced to the sprite height and shown as crisp blocks, like the image
+    model's pixel-art sprite."""
+    def stub(k, out_dir):
+        from ..pixelart import enlarge
+        paths = []
+        for i in range(k):
+            im, _ = synth.draw_character(seed=i, background=None)
+            small = imaging.pixelize(im, min(spec.height_px, 180), margin=0)
+            p = f"{out_dir}/gen{i:02d}.png"
+            enlarge(small, BLOCK).save(p)
+            paths.append(p)
+        return paths
+    return stub
+
+
+def _native(ctx, spec, refs, view):
+    """The native finish: the image model draws the character as a hand-pixelled sprite (from the reference, or from
+    the plan's description); pixelize then reads it back pixel for pixel. It is a new design, so it always waits
+    for approval (gate B)."""
+    heads = float(spec.heads_tall or ctx.style.get("heads_tall", 4.5))
+    h = int(spec.height_px)
+    fmt = dict(height=h, block=BLOCK, heads=f"{heads:g}", head_px=round(h / heads), face_px=round(h * 0.12),
+               leg_px=max(3, round(h * 0.05)), view=view, summary=spec.summary,
+               must_keep=", ".join(spec.must_keep) or "-")
+    prompt = (prompts.PIXEL_SPRITE if refs else prompts.PIXEL_SPRITE_TEXT).format(**fmt)
+    notes = ctx.notes()
+    if notes:
+        prompt += "\nChanges requested: " + "; ".join(notes)
+    with open(ctx.path("concept_prompt.txt"), "w", encoding="utf-8") as f:
+        f.write(prompt)
+    n = 1 if refs else int(ctx.cfg["budget"]["concept_drafts"])
+    out = ctx.backend.images.generate("image_final", prompt, n, ctx.path("generated"), refs[:1] or None,
+                                      _native_stub(ctx, spec))
+    cands = [imaging.load_rgba(p) for p in out]
+    for i, im in enumerate(cands):
+        ctx.save_image(f"candidate{i}", f"concept_{i:02d}.png", im)
+    thumbs = [im.resize((max(1, im.width * 256 // im.height), 256)) for im in cands]
+    ctx.save_image("sheet", "concepts_sheet.png",
+                   imaging.contact_sheet(thumbs, [f"#{i} pixel sprite" for i in range(len(cands))], 1))
+    ctx.info.update(candidates=len(cands), sources=["pixel sprite"] * len(cands), suggested=0, native=True)
+
+
 def run(ctx):
+    fix = ctx.asset.state.inputs.get("concept_fix")
+    if fix and not fix.get("concept_done"):
+        return _revise(ctx, fix)
+    spec0 = ctx.spec()
+    if ctx.cfg.get("finish", {}).get("mode") == "native" and spec0.asset_type == "character":
+        return _native(ctx, spec0, ctx.asset.references(), spec0.view.replace("_", "-"))
     spec = ctx.spec()
     refs = ctx.asset.references()
     cands, sources = [], []

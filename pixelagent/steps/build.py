@@ -21,6 +21,20 @@ def finish_mode(ctx):
     return ctx.cfg.get("finish", {}).get("mode", "artist")
 
 
+def reduced(ctx):
+    """Finishes whose sprite comes straight from the concept (no drawing): 'reduce' (a shrunk painting) and 'native'
+    (a pixel-art concept read back)."""
+    return finish_mode(ctx) in ("reduce", "native")
+
+
+def native_tones(material, n):
+    """Tones per material in the native finish, as hand-made sprites in the target style use them: 4-6 for most
+    materials (fewer for tiny ones), 6 for focal ones (eyes, mouth)."""
+    if is_focal(material):
+        return 6
+    return 6 if n >= 800 else 5 if n >= 200 else 4 if n >= 40 else 3
+
+
 # materials whose few pixels carry the character's identity: they always get their own colours
 FOCAL = ("eye", "iris", "pupil", "lash", "mouth", "lip", "tongue", "teeth", "blush", "cheek", "brow")
 
@@ -105,10 +119,11 @@ def soft_reduce(ctx):
         labels = json.load(f)["labels"]
     src = np.asarray(base).reshape(-1, 4)
     budget = int(ctx.cfg.get("finish", {}).get("reduce_colors", 96))
+    native = finish_mode(ctx) == "native"
     groups = {}
     for k, m in enumerate(labels):
-        if m is not None and src[k, 3]:
-            groups.setdefault(m, []).append(k)
+        if src[k, 3]:
+            groups.setdefault(m if m is not None else "_unlabelled", []).append(k)
     weight = {m: len(ix) ** 0.5 for m, ix in groups.items()}
     total = sum(weight.values()) or 1.0
     out = np.zeros_like(src)
@@ -116,7 +131,7 @@ def soft_reduce(ctx):
     for m, ix in groups.items():
         ix = np.array(ix)
         focal = is_focal(m)
-        k = max(6 if focal else 2, round(budget * weight[m] / total))
+        k = native_tones(m, len(ix)) if native else max(6 if focal else 2, round(budget * weight[m] / total))
         colours, cols = reduce_material(src[ix, :3].astype(float), k, focal)
         out[ix, :3] = colours
         out[ix, 3] = 255
@@ -140,11 +155,11 @@ def soft_reduce(ctx):
     doc.palette = palette
     ctx.save_project("project", doc)
     ctx.save_image("preview", "rebuild.png", imaging.from_bytes(w, h, doc.composite()))
-    ctx.info.update(mode="reduce", colors=len(palette), colors_per_material=counts, specks_merged=merged)
+    ctx.info.update(mode=finish_mode(ctx), colors=len(palette), colors_per_material=counts, specks_merged=merged)
 
 
 def rebuild(ctx):
-    if finish_mode(ctx) == "reduce":
+    if reduced(ctx):
         return soft_reduce(ctx)
     art, canvas = ctx.art, ctx.canvas
     from canvas import parse_hex
@@ -235,7 +250,7 @@ def lines(ctx):
     from canvas import parse_hex
     doc = ctx.load_project("rebuild")
     style = ctx.spec().outline
-    if finish_mode(ctx) == "reduce":
+    if reduced(ctx):
         # the concept's own soft edges are kept; an added outline ring would harden the soft look
         ctx.skipped = True
         ctx.info["reason"] = "[finish] mode = reduce keeps the concept's own edges"
@@ -322,7 +337,7 @@ def polish(ctx):
     art = ctx.art
     det = ctx.asset.state.steps.get("detail")
     doc = ctx.load_project("detail" if det and det.status == "done" and "project" in det.outputs else "lines")
-    if finish_mode(ctx) == "reduce":
+    if reduced(ctx):
         # anti-aliasing against ramp pairs and orphan removal would undo the soft reduction (its single pixels are
         # deliberate shading); the reduction is the finished sprite
         ctx.save_project("project", doc)

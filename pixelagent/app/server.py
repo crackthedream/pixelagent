@@ -76,7 +76,8 @@ def stage_status(statuses):
 
 def default_settings():
     return {"projects_dir": os.path.join(os.path.expanduser("~"), "Documents", "PixelAgent"),
-            "backend": "openai", "monthly_usd": 90.0, "asset_usd": 3.0, "sprite_height": 160, "current_project": None}
+            "backend": "openai", "monthly_usd": 90.0, "asset_usd": 3.0, "sprite_height": 160, "look": "soft",
+            "current_project": None}
 
 
 def load_settings():
@@ -108,27 +109,40 @@ def overrides(s):
     return {"backend": {"mode": s["backend"]},
             "budget": {"monthly_usd": float(s["monthly_usd"]), "max_usd_per_asset": float(s.get("asset_usd", 3.0)),
                        "monthly_scope_dir": s["projects_dir"], "ledger": ledger_path()},
-            "style": {"sprite_height": int(s["sprite_height"])}}
+            "style": {"sprite_height": int(s["sprite_height"]), **LOOKS[s.get("look", "soft")]["style"]},
+            "finish": LOOKS[s.get("look", "soft")]["finish"]}
+
+
+# the app's two looks: soft = the game-sprite look (reduce finish, docs/FACE_ROOT_CAUSE.md), classic = strict palette
+# with the model-drawn finish and the face kit
+LOOKS = {"soft": {"style": {"look": "soft", "outline": "soft"}, "finish": {"mode": "native"}},
+         "classic": {"style": {"look": "classic", "outline": "selout"}, "finish": {"mode": "artist"}}}
 
 
 # upper-bound estimates (USD, OpenAI mode) shown before starting; from real runs: a 96-px character ~$1.15 with the
 # fresh face pass, 64 px ~$0.70; 128 px extrapolated; 160 px: four real runs reusing the concept cost $0.62-1.27
 # (drawing 21-40 rounds + face pass), so ~$1.35-1.45 with concept and map, here with headroom. Animations: plan + pose sheet ~$0.07, then ~$0.33 per drawn
 # frame (two real 96-px walks: $1.46 for 6 frames, ~$1.95 for 6 frames from the exe on 2026-11-09).
-# the reduce finish (soft look) has no drawing step: plan, concept, material map, grid pick and critique only
+# the reduce finish (soft look) has no drawing step: plan, concept, material map, grid pick and critique, and one
+# proportion retry when the concept misses (~$0.14 without, ~$0.25 with one)
 REDUCE_CHARACTER = {"64": 0.30, "96": 0.30, "128": 0.30, "160": 0.30}
 ESTIMATES = {"character": {"64": 0.70, "96": 1.15, "128": 1.70, "160": 1.50}, "animation_base": 0.08, "animation_per_frame": 0.33,
              # revising the current drawing (a short session) instead of drawing it again (~$0.90)
              "revise_area": 0.20, "revise_whole": 0.35}
 
 
-def estimates():
+def estimates(settings=None):
     """The estimates the app shows: a character costs far less when the finish is the reduction (no drawing)."""
-    from ..config import load_config
-    mode = load_config().get("finish", {}).get("mode", "artist")
+    if settings is not None:
+        mode = LOOKS[settings.get("look", "soft")]["finish"]["mode"]
+    else:
+        from ..config import load_config
+        mode = load_config().get("finish", {}).get("mode", "artist")
     # animations: plan + pose sheet only (~$0.10), no per-frame drawing
-    return ({**ESTIMATES, "character": REDUCE_CHARACTER, "animation_base": 0.15, "animation_per_frame": 0.0}
-            if mode == "reduce" else ESTIMATES)
+    # revisions: one concept edit + material map + critique (~$0.12)
+    return ({**ESTIMATES, "character": REDUCE_CHARACTER, "animation_base": 0.15, "animation_per_frame": 0.0,
+             "revise_area": 0.15, "revise_whole": 0.15}
+            if mode in ("reduce", "native") else ESTIMATES)
 
 
 def spend_check(settings, pid=None, aid=None):
@@ -295,6 +309,12 @@ def asset_detail(settings, pid, proj, aid):
         steps.append({"name": names[0], "label": label, "status": stage_status(st_),
                       "version": sum(recs[n].version for n in names if recs.get(n)), "error": errs[0] if errs else ""})
     d["steps"] = steps
+    mat = recs.get("materials")
+    if d["kind"] == "character" and mat and (mat.info or {}).get("heads_tall_measured"):
+        # the soft look's proportion check (materials.proportion_check): what was measured, and any redo
+        d["proportions"] = {"heads_tall": mat.info["heads_tall_measured"],
+                            "retries": int(a.state.inputs.get("proportion_retries", 0)),
+                            "note": mat.info.get("proportions") or ""}
     d["inputs"] = {k: v for k, v in a.state.inputs.items() if k in ("prompt", "height", "view", "character", "frames", "anim")}
     d["log"] = JOBS.logs.get((pid, aid), [])[-40:]
     from .. import cancel
@@ -701,11 +721,12 @@ def fix_item(settings, body):
         raise ValueError("only a finished sprite can be revised")
     from ..revise import clamp_box
     box = clamp_box(body.get("box"), *image_size(pipe.asset.path(rec.outputs["preview"]))) if body.get("box") else None
-    if not pipe.request_fix(note, box):
+    target = pipe.request_fix(note, box)
+    if not target:
         raise ValueError("this sprite has no drawing to revise; use Redo from Drawing instead")
     pipe.asset.state.inputs.setdefault("notes", {}).setdefault("artist", []).append(note)
     pipe.asset.save()
-    pipe.reset_from("artist")
+    pipe.reset_from(target)   # 'concept' in the reduce finish: the concept is edited and reduced again
     start_run(settings, pid, aid)
     return {"ok": True}
 
@@ -806,8 +827,9 @@ class Handler(BaseHTTPRequestHandler):
                 spent = ledger_month_spend(ledger_path(), seed_dir=s["projects_dir"])
                 return self._json({"projects": projects, "current": cur, "settings": {
                     "backend": s["backend"], "monthly_usd": s["monthly_usd"], "asset_usd": s.get("asset_usd", 3.0),
-                    "sprite_height": s["sprite_height"], "projects_dir": s["projects_dir"], "key_found": key_found()},
-                    "month_spent": round(spent, 2), "estimates": estimates(),
+                    "sprite_height": s["sprite_height"], "projects_dir": s["projects_dir"], "key_found": key_found(),
+                    "look": s.get("look", "soft")},
+                    "month_spent": round(spent, 2), "estimates": estimates(s),
                     "trash_count": len(trash(s).entries())})
             if u.path == "/api/assets":
                 proj = Project(project_path(s, q["project"]))
@@ -892,11 +914,13 @@ class Handler(BaseHTTPRequestHandler):
                 os.startfile(path) if os.name == "nt" else subprocess.Popen(["xdg-open", path])
                 return self._json({"ok": True})
             if u.path == "/api/settings":
-                for k in ("backend", "monthly_usd", "asset_usd", "sprite_height", "projects_dir"):
+                for k in ("backend", "monthly_usd", "asset_usd", "sprite_height", "projects_dir", "look"):
                     if k in body and body[k] not in (None, ""):
                         s[k] = body[k]
                 if s["backend"] not in ("openai", "dry_run"):
                     raise ValueError("unknown backend")
+                if s.get("look", "soft") not in LOOKS:
+                    raise ValueError("choose the soft or the classic look")
                 try:
                     s["monthly_usd"] = float(s["monthly_usd"])
                     s["asset_usd"] = float(s.get("asset_usd", 3.0))

@@ -6,15 +6,38 @@ from .. import imaging, prompts
 from ..schemas import Pick
 
 
+def _native(ctx):
+    """The native finish: the concept IS a pixel-art sprite drawn as blocks: read it back pixel for pixel."""
+    from ..pixelart import sprite_from_pixel_art
+    concept = imaging.load_rgba(ctx.input("concept", "concept"))
+    fix = ctx.asset.state.inputs.get("concept_fix") or {}
+    keep = fix.get("grid") if fix.get("box") else None    # an area revision keeps the grid
+    from .concept import BLOCK
+    canvas, geom = sprite_from_pixel_art(concept, int(ctx.style["canvas_margin"]), grid=keep, expected=BLOCK)
+    ctx.save_image("candidate0", "grid_00.png", canvas)
+    ctx.save_image("pixel_base", "pixel_base.png", canvas)
+    ctx.save_json("geom", "grid_geom.json", geom)
+    bb = canvas.getbbox()
+    ctx.info.update(picked=0, reason="native finish: the pixel-art concept read back block by block" +
+                    ("; area revision: the previous grid is kept" if keep else ""),
+                    grid=geom["grid"], size=list(canvas.size), sprite_height=(bb[3] - bb[1]) if bb else 0)
+
+
 def run(ctx):
     spec = ctx.spec()
+    if ctx.cfg.get("finish", {}).get("mode") == "native":
+        return _native(ctx)
     concept = imaging.load_rgba(ctx.input("concept", "concept"))
     offs = [float(o) for o in ctx.cfg["pixelize"]["offsets"]]
     combos = list(itertools.product(offs, offs))[: int(ctx.cfg["budget"]["grid_candidates"])]
+    fix = ctx.asset.state.inputs.get("concept_fix") or {}
+    keep = fix.get("offsets") if fix.get("box") else None
+    if keep:   # an area revision: the same grid as before, so everything outside the area lands on the same pixels
+        combos = [tuple(float(v) for v in keep)]
     # The final sprite, outline included, must fit spec.height_px with canvas_margin free pixels around it:
     # the outline adds 1 px on every side, and a shifted grid can need one extra sample row.
     # no outline ring in the reduce finish (the concept's own edges stay), so the figure uses the full height
-    ol = 0 if spec.outline == "none" or ctx.cfg.get("finish", {}).get("mode") == "reduce" else 1
+    ol = 0 if spec.outline == "none" or ctx.cfg.get("finish", {}).get("mode") in ("reduce", "native") else 1
     margin = int(ctx.style["canvas_margin"]) + ol
     body_h = max(4, spec.height_px - 2 * ol - 1)
     cands, scores, geoms = [], [], []
@@ -34,8 +57,9 @@ def run(ctx):
         return Pick(index=best, reason="cleanest silhouette by lint (dry run)",
                     ranking=sorted(range(len(cands)), key=lambda i: -scores[i]))
 
-    pick = ctx.backend.llm.structured("vision_pick", prompts.PICK_GRID.format(n=len(cands)),
-                                      f"spec: {spec.summary}", [sheet_path], Pick, stub)
+    pick = (Pick(index=0, reason="area revision: the previous grid is kept", ranking=[0]) if keep else
+            ctx.backend.llm.structured("vision_pick", prompts.PICK_GRID.format(n=len(cands)),
+                                       f"spec: {spec.summary}", [sheet_path], Pick, stub))
     if not 0 <= pick.index < len(cands):
         raise ValueError(f"model picked candidate {pick.index}, only 0..{len(cands) - 1} exist")
     ctx.save_image("pixel_base", "pixel_base.png", cands[pick.index])

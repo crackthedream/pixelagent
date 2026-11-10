@@ -192,14 +192,33 @@ class Pipeline:
         return None
 
     def request_fix(self, note, box=None):
-        """Revise the current drawing with a note (and optionally only inside box) instead of drawing anew."""
+        """Revise the current sprite with a note (optionally only inside box) instead of starting over. Returns the
+        step to redo from ('artist': the model edits the drawing; 'concept': in the reduce finish the concept is
+        edited and reduced again), or False when there is nothing to revise."""
+        st = self.asset.state.steps
+        if self.project.config.get("finish", {}).get("mode") in ("reduce", "native") and "concept" in st:
+            conc = (st["concept"].outputs or {}).get("concept")
+            if not conc or not os.path.exists(self.asset.path(conc)):
+                return False
+            pix = st.get("pixelize")
+            geom = None
+            if pix and (pix.outputs or {}).get("geom") and os.path.exists(self.asset.path(pix.outputs["geom"])):
+                with open(self.asset.path(pix.outputs["geom"]), encoding="utf-8") as f:
+                    geom = json.load(f)
+            self.asset.state.inputs["concept_fix"] = {
+                "note": note, "box": list(box) if box else None, "from_concept": conc, "geom": geom,
+                "offsets": list((pix.info or {}).get("offsets") or []) if pix else None,
+                "grid": (pix.info or {}).get("grid") if pix else None,
+                "from_project": (st["artist"].outputs or {}).get("project") if "artist" in st else None}
+            self.asset.save()
+            return "concept"
         rec = self.asset.state.steps.get("artist")
         proj = (rec.outputs or {}).get("project") if rec else None
         if not proj or not os.path.exists(os.path.join(self.asset.path(proj), "project.json")):
             return False
         self.asset.state.inputs["fix"] = {"note": note, "box": list(box) if box else None, "from_project": proj}
         self.asset.save()
-        return True
+        return "artist"
 
     def decide(self, approved, pick=None, note="", box=None):
         s = self.pending_gate()
@@ -211,10 +230,11 @@ class Pipeline:
             notes.setdefault(s.name, []).append(note)
             if s.redo_from:
                 notes.setdefault(s.redo_from, []).append(note)
-                if s.redo_from == "artist":  # revise the current drawing rather than starting it again
-                    self.request_fix(note, box)
+                target = s.redo_from
+                if s.redo_from == "artist":  # revise the current sprite rather than starting it again
+                    target = self.request_fix(note, box) or s.redo_from
                 self.asset.save()
-                self.reset_from(s.redo_from)
+                self.reset_from(target)
                 return s
             rec = self.asset.record(s.name)
             rec.status = "pending"

@@ -33,8 +33,9 @@ def _evaluate(ctx, doc, tag, ref=None):
         return Critique(scores=Scores(cleanliness=round(s, 1)), overall=round(s, 1), issues=issues,
                         verdict="pass" if not any(i.severity == "high" for i in issues) else "repair")
 
-    note = (prompts.CRITIC_SOFT.format(colors=spec.max_colors)
-            if ctx.cfg.get("finish", {}).get("mode") == "reduce" else "")
+    fmode = ctx.cfg.get("finish", {}).get("mode")
+    note = (prompts.CRITIC_SOFT.format(colors=spec.max_colors) if fmode == "reduce"
+            else prompts.CRITIC_NATIVE if fmode == "native" else "")
     crit = ctx.backend.llm.structured("critic", prompts.CRITIC.format(light=spec.light, lint=json.dumps(lint),
                                                                       style_note=note),
                                       spec.model_dump_json(), [pg, p1, ctx.input("concept", "concept")], Critique, stub)

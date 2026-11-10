@@ -117,8 +117,9 @@ class OpenAIImages(_Base):
         return (txt_in * p.get("text_input", 0) + img_in * p.get("image_input", 0)
                 + usage.output_tokens * p.get("output", 0)) / 1e6
 
-    def generate(self, role, prompt, n, out_dir, refs=None, stub=None, quality=None):
-        """Generate n images (refs given -> images.edit with the references). Returns PNG paths."""
+    def generate(self, role, prompt, n, out_dir, refs=None, stub=None, quality=None, mask=None):
+        """Generate n images (refs given -> images.edit with the references; mask: a PNG whose transparent area is
+        the only part the model may change). Returns PNG paths."""
         self.check_budget()
         os.makedirs(out_dir, exist_ok=True)
         model = self.model_for(role)
@@ -134,7 +135,13 @@ class OpenAIImages(_Base):
                 extra = {}
                 if icfg.get("input_fidelity"):  # not every image model accepts it (2.6-sunburst does not)
                     extra["input_fidelity"] = icfg["input_fidelity"]
-                resp = self.client.images.edit(image=files, **common, **extra)
+                if mask:
+                    files.append(open(mask, "rb"))
+                    extra["mask"] = files[-1]
+                    files_for_image = files[:-1]
+                else:
+                    files_for_image = files
+                resp = self.client.images.edit(image=files_for_image, **common, **extra)
             else:
                 resp = self.client.images.generate(**common)
         except Exception as e:

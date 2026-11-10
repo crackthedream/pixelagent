@@ -196,6 +196,20 @@ shapes are reinvented. So the soft look now **finishes the sprite from the reduc
   - **First real walk** (ref08, 6 frames, `bench_runs_batch/assets/ref08-walk`): $0.06 in 78 s, against $1.46-1.95
     for the model-drawn walks. Frames are consistent and in the character's soft style. The motion is subtle (a
     kimono walk) and turned three-quarters to the side, as the sheet drew it.
+- **Calmer concepts** (owner: eyes at a suitable size, not enlarged). The restyle and look prompts ask for eyes
+  "of a natural size for the face (as the reference draws them)" and a calm, readable composition: a relaxed
+  standing pose, arms close to the body, hair at a moderate volume close to the figure, props small and held close.
+  The four lowest-rated references re-run ($0.81, `bench_runs_calm`): ref03's hair hugs the figure, ref09 is
+  slimmer with a smaller plush, ref01 stands calmer (5.3 heads, kept after one retry), ref02 is similar.
+- **Revising through the concept.** In the reduce finish, `Pipeline.request_fix` returns 'concept':
+  - the approved concept is edited with the note (`prompts.REVISE_CONCEPT`);
+  - an area fix sends a mask, takes back only that area into the old concept, keeps the previous grid (pixelize)
+    and restores everything outside the area from the old sprite (`revise.confine`);
+  - no second concept approval and no proportion retry; about $0.12-0.15 a revision. The review-gate rejection
+    goes the same way.
+- **App:** a Look setting (Soft = reduce finish, Classic = model-drawn finish with the face kit; `server.LOOKS`),
+  estimates per look ($0.30 vs $1.50 a character), and the item page shows the measured proportions and any
+  concept redo.
 
 ## 5. Direction (as proposed before implementation)
 
@@ -236,3 +250,52 @@ drift per stage, so a step that damages the face shows up immediately.
 Nothing from this work is committed yet: the 160-px default, the soft look, face kit v4 with the measured layout,
 and this analysis are uncommitted in `pixelagent` (last commit `841d9ea`) and `pixelliner-mcp` (last commit
 `7768ace`).
+
+
+---
+
+## 7. Next direction: sprites designed as pixel art (2026-11-10)
+
+The owner: an overly realistic recreation loses the pixel-art style. Making a standard illustration chibi and then
+converting it is not the goal; the characters should follow how Alice in Cradle builds them. Noel's faces are not
+detailed, but they have a vividness unique to pixel art, and so do her proportions and scale.
+
+Side by side at 6× the difference is plain. Noel is built from crisp, deliberate clusters: hair as bright shapes with
+drawn strands, each eye a distinct pixel shape. The reduce finish gives a soft blur, like a shrunk photo.
+
+**Measured on Noel** (one standing frame, material map plus colour texture, scratchpad only):
+
+| Rule | Noel |
+|---|---|
+| Proportions | ~4.7 heads tall at ~157 px; head ~32 px, face ~18 px, legs ~8 px wide |
+| Colour | about 4-6 tone bands per material, as clusters |
+| Edges | no dark outline; silhouette edge brightness median 225 of 255 |
+| Face | a few designed pixel shapes; expression from lash and eye shape (~170 eye variants), a tiny mouth |
+
+**Experiment** (`benchmarks/pixel_native.py`, `bench_runs_native`, $0.17 for three):
+- The image model draws the character as an authentic pixel-art sprite from these rules, each sprite pixel an 8×8
+  block. Grid recovery (period search, smallest near-best period, block centres read by their dominant colour)
+  recovered synthetic tests at 6, 7.6, 8 and 9.3 px blocks pixel-exactly.
+- **Result:** genuine pixel art with crisp clusters and pixel-designed faces (ref08's eyes: lash, red iris,
+  highlight).
+- **Open issues:** dark outlines and higher contrast than Noel's light, soft edges; proportions and size vary
+  (ref02 ~6 heads, 174-186 px); ref05 drew grid lines (recovery locked onto them); the block reading leaves a few
+  hundred colours, which needs a palette step.
+
+**Built in as the native finish** (`[finish] mode = "native"`, the default; the app's Soft look):
+- **Concept:** the image model draws the character as a hand-pixelled sprite from the reference or the plan
+  (`prompts.PIXEL_SPRITE` / `PIXEL_SPRITE_TEXT`, rules in `PIXEL_RULES`: no grid lines, a light high-key palette,
+  no dark outline, about 4.5 heads, a pixel-designed face). It always waits at gate B.
+- **Pixelize:** `pixelart.sprite_from_pixel_art` reads it back. The block size comes from the autocorrelation of
+  the edge profile within 0.7-1.45x of the 8 px asked for. A walk along each axis snaps every block edge to the
+  nearest real edge, because an image model's "pixels" drift: real images had blocks of 8.3-10.2 px, and a fixed
+  grid would drift by whole blocks. Each block takes its dominant colour; the background is cut by a flood fill
+  from the border. The geometry uses the pipeline's convention, so material map, labels, face crops, the
+  proportion check and area revisions work unchanged.
+- **Rebuild:** 3-6 tones per material (`build.native_tones`, 6 for focal ones) through `reduce_material`, which
+  keeps the darkest and lightest shades. No outline ring, no drawing; the critic gets `prompts.CRITIC_NATIVE`.
+- **Revisions** edit the pixel-art concept unscaled (no blur) and keep the grid for area fixes.
+- **Animations** still use the pose-sheet path of the reduce finish; a pixel-art pose sheet is a later step.
+- **Real run** (`bench_runs_native2`, ref08/02/05/03, $0.74): genuine pixel-art sprites with crisp clusters and
+  pixel faces, 4.0-4.6 heads, 147-170 px, 30-56 colours. They are still darker and more saturated than Noel (dark
+  hair and navy costumes), and the hair has darker edges in places.

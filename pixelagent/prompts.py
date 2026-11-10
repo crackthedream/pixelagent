@@ -16,8 +16,11 @@ ground, no text. Subject: {summary}. Must keep: {must_keep}.{look}"""
 LOOK_SOFT = """
 Art style (this matters as much as the design): a cute anime-style character for a 2D side-scrolling action game.
 Proportions about {heads} heads tall: a LARGE head (with the hair about a fifth of the full height; a stylised
-game figure between chibi and realistic) with a large, soft face, big expressive anime eyes set fairly low in the face, a tiny nose and a small mouth; a small, slim body
-with short slender limbs and small hands and feet. A smooth, clean digital illustration (not pixel art, no visible
+game figure between chibi and realistic) with a large, soft face, expressive anime eyes of a natural size for the
+face (as the reference draws them) set fairly low, a tiny nose and a small mouth; a small, slim body with short
+slender limbs and small hands and feet. A calm, readable composition: a relaxed standing pose with the arms close to the body, the hair at a
+moderate volume close to the figure (not spreading wide), props small and held close, no busy overlapping
+layers. A smooth, clean digital illustration (not pixel art, no visible
 pixels). Light, soft, pastel-leaning colours, gentle low-contrast shading, soft coloured edges, no heavy black
 outlines. Costume simplified into a few large clear shapes: keep the
 defining colours, the hair shape and the two or three signature accessories; drop small ornaments, fine patterns
@@ -32,15 +35,46 @@ standing figure (legs, shoes) consistently in the same style and costume. Plain 
 scenery, no furniture, no props that are not part of the character, no text. Large simple shapes, clear value
 separation between materials, soft single light from the {light}, no cast shadow.{look}"""
 
+# the native finish: the character drawn AS a hand-pixelled sprite (pixelart.py reads it back pixel for pixel). The
+# rules are measured from Alice in Cradle's sprites (docs/FACE_ROOT_CAUSE.md section 7), described without naming it.
+PIXEL_RULES = """SCALE: the sprite is about {height} pixels tall, drawn pixel by pixel. Show it enlarged so that EVERY
+sprite pixel is a crisp, perfectly square block of exactly {block}x{block} image pixels on one regular grid
+(nearest-neighbour: no smoothing, no blur, no anti-aliasing between blocks). Do NOT draw grid lines or pixel borders.
+PROPORTIONS for that size: about {heads} heads tall -- the head with hair about {head_px} pixels, a large face about
+{face_px} pixels wide, slim legs about {leg_px} pixels wide, small hands of a few pixels. A stylised game figure
+between chibi and realistic, NOT a tall realistic figure.
+PIXEL-ART RULES: a light, soft, high-key palette. Each material (skin, hair, each garment) uses 4-6 flat tones laid
+down as clean, deliberate clusters -- no gradients, no dithering, no noise. NO dark outline around the figure: its
+edges are soft, LIGHTER or slightly darker tones of the material itself; dark pixels only inside the design (lashes,
+pupils, dark materials). Light from the top-left. Hair as large shaped masses with a few drawn strands and bright
+highlight bands. The FACE is designed in pixels, simple and vivid: each eye a small shape of a dark lash line, an
+iris of 2-3 pixels with a 1-pixel highlight and a hint of white; a tiny mouth of 1-3 pixels; no nose; soft blush
+pixels if the character has them.
+A calm, readable figure: relaxed standing pose with the arms close to the body, props small and held close, {view}
+view, centered, full body. Plain flat light-grey background, no shadow, no text."""
+
+PIXEL_SPRITE = """Redraw the character in this image as an authentic hand-pixelled SPRITE for a 2D side-scrolling anime
+action game, in the style of modern hand-made pixel-art action platformers. Keep who the character is: hairstyle and
+hair colour, eye colour, costume colours and the signature accessories, simplified for this size. Character:
+{summary}. Must keep: {must_keep}.
+""" + PIXEL_RULES
+
+PIXEL_SPRITE_TEXT = """An authentic hand-pixelled SPRITE of a character for a 2D side-scrolling anime action game, in
+the style of modern hand-made pixel-art action platformers. Character: {summary}. Must keep: {must_keep}.
+""" + PIXEL_RULES
+
 # the soft look's reference redraw: proportions come FIRST and with numbers -- an image edit anchors strongly on the
 # reference, and a style note at the end left realistic proportions untouched (ref03, 2026-11-10)
 RESTYLE_REFERENCE = """Restyle the character in this image into a full-body concept for a cute 2D side-scrolling
 action game.
 PROPORTIONS FIRST -- do NOT keep the reference's body proportions: the figure is about {heads} heads tall, so the
 head (with hair) is about {head_pct}% of the full height -- about one fifth: a stylised game figure between chibi
-and realistic proportions. A large head and a large, soft face with big expressive
-anime eyes set fairly low, a tiny nose and a small mouth. A small, slim body: short torso, slender legs (about 40%
-of the height), small hands and feet.
+and realistic proportions. A large head and a large, soft face with expressive anime eyes of a natural size for the
+face (as the reference draws them) set fairly low, a tiny nose and a small mouth. A small, slim body: short torso,
+slender legs (about 40% of the height), small hands and feet.
+A calm, readable composition: a relaxed standing pose with the arms close to the body, the hair at a
+moderate volume close to the figure (not spreading wide), props small and held close, no busy overlapping
+layers.
 Keep who the character is: the expression, hairstyle and hair colour, eye colour, costume colours and the signature
 accessories. Character: {summary}. Must keep: {must_keep}.
 Finish: a smooth, clean digital anime illustration (not pixel art, no visible pixels); light, pastel-leaning colours,
@@ -49,6 +83,11 @@ clear shapes, small ornaments, fine patterns and busy folds dropped.
 {view} view, FULL BODY from the top of the head to the shoes, standing in a relaxed neutral pose, centered, with some
 empty space around the figure. Plain flat light-grey background, no scenery, no props that are not part of the
 character, no text, soft single light from the {light}, no cast shadow."""
+
+# revising a finished character in the reduce finish: the change is made on the concept, which is then reduced again
+REVISE_CONCEPT = """Edit this character concept. Change requested: {note}
+{scope}Keep everything else exactly as it is: the same character, pose, proportions, framing, colours, style and
+background. The result must look like the same illustration with only the requested change."""
 
 REFINE_CONCEPT = """Refine this concept for pixel-art conversion without changing the design: keep identity, pose,
 colours and proportions; simplify noisy detail into large clear shapes, make the silhouette crisp, keep the
@@ -114,6 +153,14 @@ verdict: pass if overall >= 8 and no high-severity issue, else repair.
 Size convention (by design, do not report it as an issue): height_px is the sprite's height INCLUDING its
 outline; the canvas adds a transparent margin on every side, so the canvas is larger than height_px.{style_note}
 Objective lint results: {lint}"""
+
+# the critic's note for the native finish: hand-pixelled sprites
+CRITIC_NATIVE = """
+STYLE (by design, do not report it as an issue): this game's look is hand-pixelled anime action-game sprites. A
+light palette with 4-6 tones per material in deliberate clusters, soft edges and no dark outline ring are intended;
+do not ask to add an outline or reduce to a strict palette. Judge what matters: readability at 1x, proportions,
+identity against the concept, the face and its expression, hands and held items, and clean clusters (no noise).
+The lint counts below follow strict-palette rules: treat them as information."""
 
 # the critic's note for the soft look's reduce finish (config [finish] mode = "reduce")
 CRITIC_SOFT = """

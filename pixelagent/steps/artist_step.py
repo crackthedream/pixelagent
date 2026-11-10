@@ -17,17 +17,26 @@ def mode(ctx):
 
 
 def run(ctx):
-    if mode(ctx) not in ("artist", "reduce"):
+    if mode(ctx) not in ("artist", "reduce", "native"):
         ctx.skipped = True
         ctx.info["reason"] = "[finish] mode is not 'artist'"
         return
     doc = ctx.load_project("polish")
     fix = ctx.asset.state.inputs.get("fix")
-    if mode(ctx) == "reduce" and not (fix and os.path.exists(os.path.join(ctx.asset.path(fix.get("from_project", "")),
+    if mode(ctx) in ("reduce", "native") and not (fix and os.path.exists(os.path.join(ctx.asset.path(fix.get("from_project", "")),
                                                                          "project.json"))):
         # the reduction is the sprite: no drawing and no face pass (docs/FACE_ROOT_CAUSE.md). It is passed through as
         # this step's result, so a note at the review (or Revise) has the model edit THIS sprite, versions work as usual
         ctx.asset.state.inputs.pop("fix", None)
+        cfix = ctx.asset.state.inputs.pop("concept_fix", None)
+        if cfix and cfix.get("box") and cfix.get("from_project") and \
+                os.path.exists(os.path.join(ctx.asset.path(cfix["from_project"]), "project.json")):
+            from ..revise import confine   # outside the area the sprite stays exactly as it was
+            old = ctx.projectio.load_project(ctx.asset.path(cfix["from_project"]))
+            if (old.w, old.h) == (doc.w, doc.h):
+                ctx.info["restored_outside_area"] = confine(doc, old, cfix["box"])
+        if cfix:
+            ctx.info["revised"] = {"note": cfix.get("note"), "box": cfix.get("box"), "via": "concept"}
         ctx.save_project("project", doc)
         ctx.save_image("preview", "artist.png", imaging.from_bytes(doc.w, doc.h, doc.composite()))
         ctx.info["reason"] = "[finish] mode = reduce: the reduction is the sprite (no drawing)"

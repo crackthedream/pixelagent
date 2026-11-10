@@ -22,6 +22,8 @@ def proportion_check(ctx, img, labels, w, h):
     spec = ctx.spec()
     if spec.asset_type != "character" or ctx.style.get("look") != "soft":
         return
+    if ctx.asset.state.inputs.get("concept_fix"):   # a revision keeps the approved concept's proportions
+        return
     ccfg = ctx.cfg.get("concept", {})
     lo, hi = (float(v) for v in ccfg.get("heads_range", [4.0, 5.0]))
     ht = heads_tall(img, labels, w, h)

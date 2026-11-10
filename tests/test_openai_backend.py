@@ -264,6 +264,8 @@ class OpenAIBackendTests(unittest.TestCase):
         self.assertIn("22% of the full height", prompt)   # 100 / 4.5
         self.assertIn("between chibi", prompt)
         self.assertIn("not pixel art", prompt)
+        self.assertIn("calm, readable composition", prompt)          # owner ratings: busy compositions rated lower
+        self.assertNotIn("big expressive", prompt)                     # eyes: suitable, not enlarged (owner)
         self.assertIn("no heavy black outlines", prompt)
         self.assertNotIn("same proportions", prompt)
         spec = json.loads(open(a.output("intake", "spec"), encoding="utf-8").read())
@@ -290,6 +292,22 @@ class OpenAIBackendTests(unittest.TestCase):
         self.assertTrue(any("LARGER" in p for p in edits), "the redo's prompt carries the correction")
         self.assertIn("kept", a.state.steps["materials"].info["proportions"])
         self.assertEqual(a.state.steps["materials"].info["heads_tall_measured"], 6.0)
+
+    def test_reduce_revision_masks_an_area_edit(self):
+        self.proj.config["finish"]["mode"] = "reduce"
+        flat = os.path.join(self.tmp, "flat.png")
+        synth.draw_character(seed=2, size=384, background=(200, 200, 204))[0].save(flat)
+        self.assertEqual(self._run("rev", {"references": [flat], "height": 40}), "complete")
+        for box, masked in (((8, 8, 6, 6), True), (None, False)):
+            n = len(self.client.log)
+            pipe = Pipeline(self.proj, "rev", client=self.client)
+            self.assertEqual(pipe.request_fix("a red bow", box), "concept")
+            pipe.reset_from("concept")
+            Pipeline(self.proj, "rev", client=self.client).run(auto_approve=True, log=quiet)
+            edit = [kw for name, kw in self.client.log[n:] if name == "edit" and "Change requested" in kw["prompt"]]
+            self.assertEqual(len(edit), 1)
+            self.assertIn("a red bow", edit[0]["prompt"])
+            self.assertEqual("mask" in edit[0], masked, box)
 
     def _repair_case(self, second_overall):
         bad = Critique(overall=6.0, verdict="repair", issues=[
