@@ -164,6 +164,29 @@ shapes are reinvented. So the soft look now **finishes the sprite from the reduc
   - The pipeline then redoes from the concept, once (`proportion_retries`). At gate B the new concept waits for
     approval as usual; test runs never retry.
   - Cost: ~$0.11 more, only when a concept misses.
+- **Validation batch** (2026-11-10, `benchmarks/batch.py`, all ten owner references, `bench_runs_batch`):
+  - 10/10 complete, $2.22 in total ($0.14 without a retry, ~$0.25 with one), 2.5-5.5 min each.
+  - The proportion retry fired on 7/10. First attempts leaned too tall: 6 of 7 misses measured 5.3-6.4 heads, an
+    overcorrection by the "not chibi" wording. ref06 measured 3.1 and its retry overshot to 5.5. Final 3.3-5.5.
+  - Owner ratings (`benchmarks/batch_review.py`, 1-5): **face 4.0, overall 3.7** on average. Top: ref08 5/5
+    (4.18 heads) and ref10 5/4 (4.42). Lowest: ref02 2/4 (3.31) and ref09 3/4 (3.70).
+  - Tendencies: about 4.2-5.0 heads rates best and the chibi side lowest; busy compositions (big hair volume,
+    heavy dark uniforms, props across the torso, wide poses) rate lower; the two faces rated 3 are three-quarter
+    faces narrowed by long dark hair.
+- **Tuned from the ratings:**
+  - target `heads_tall` 4.5 (was 4.6) and `heads_range` 4.0-5.0 (was 3.2-5.2);
+  - softer wording ("a stylised game figure between chibi and realistic") in place of "NOT a chibi... a head of a
+    third of the height or more is too big", which pushed first attempts to 5.3-6.4;
+  - corrections in proportion to the miss ("a little" under 0.9 heads off, otherwise "clearly"), after ref06's
+    strong correction overshot from 3.1 to 5.5.
+- **Five new concepts** (ref01/02/03/06/09, up to the proportion check, $1.14, `bench_runs_tune`):
+  - All five ended in range (4.18-4.82) after at most one retry, and the proportional corrections did not
+    overshoot.
+  - First attempts swung the other way with the softer wording: 2.9-3.7 heads (too chibi), so 4 of 5 retried. The
+    image model's first try follows the wording's emphasis ("not chibi": too tall; "between chibi and
+    realistic": too chibi). The measure-and-correct step is what reliably lands the proportions (batch 9/10,
+    here 5/5).
+  - Expected cost per character is therefore ~$0.25 (one retry) rather than $0.14.
 
 ## 5. Direction (as proposed before implementation)
 

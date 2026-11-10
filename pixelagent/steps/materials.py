@@ -14,7 +14,7 @@ from . import matmap
 
 
 def proportion_check(ctx, img, labels, w, h):
-    """The soft look's proportions vary a lot between concepts (2.8 and 5.7 heads tall for a 4.6 target, 2026-11-10):
+    """The soft look's proportions vary a lot between concepts (2.8 to 6.4 heads tall for a 4.5-4.6 target, 2026-11-10):
     measure them on the reduced sprite, and when they fall outside [concept] heads_range, ask for the concept to be
     redone once with a correction (pipeline: info 'redo_from')."""
     from ..face import heads_tall
@@ -23,7 +23,7 @@ def proportion_check(ctx, img, labels, w, h):
     if spec.asset_type != "character" or ctx.style.get("look") != "soft":
         return
     ccfg = ctx.cfg.get("concept", {})
-    lo, hi = (float(v) for v in ccfg.get("heads_range", [3.2, 5.2]))
+    lo, hi = (float(v) for v in ccfg.get("heads_range", [4.0, 5.0]))
     ht = heads_tall(img, labels, w, h)
     ctx.info["heads_tall_measured"] = round(ht, 2) if ht else None
     if ht is None or lo <= ht <= hi:
@@ -33,11 +33,13 @@ def proportion_check(ctx, img, labels, w, h):
     if done >= int(ccfg.get("proportion_retries", 1)) or isinstance(ctx.backend.images, StubImages):
         ctx.info["proportions"] = f"{ht:.1f} heads tall, outside {lo:g}-{hi:g}; kept (no retry left or a test run)"
         return
-    target = float(spec.heads_tall or ctx.style.get("heads_tall", 4.6))
+    target = float(spec.heads_tall or ctx.style.get("heads_tall", 4.5))
+    # a correction in proportion to the miss: a strong note overshot (ref06: 3.1 -> 5.5 heads, 2026-11-10)
+    amount = "a little" if abs(ht - target) < 0.9 else "clearly"
     if ht > hi:
-        fix = "make the head LARGER relative to the body (a shorter torso and shorter legs)"
+        fix = f"make the head {amount} LARGER relative to the body (a slightly shorter torso and legs)"
     else:
-        fix = "make the head SMALLER relative to the body (a longer torso and longer legs; not chibi)"
+        fix = f"make the head {amount} SMALLER relative to the body (a slightly longer torso and legs)"
     note = (f"Proportions: the last version came out about {ht:.1f} heads tall; it must be about {target:g} heads "
             f"tall: {fix}. Keep everything else the same.")
     inputs["proportion_retries"] = done + 1

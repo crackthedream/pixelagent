@@ -38,7 +38,7 @@ def run(ctx):
     cands, sources = [], []
     view = spec.view.replace("_", "-")
     soft = ctx.style.get("look") == "soft" and spec.asset_type == "character"
-    look = prompts.LOOK_SOFT.format(heads=spec.heads_tall or ctx.style.get("heads_tall", 4.6)) if soft else ""
+    look = prompts.LOOK_SOFT.format(heads=spec.heads_tall or ctx.style.get("heads_tall", 4.5)) if soft else ""
     if refs:
         mode = ctx.cfg.get("concept", {}).get("clean_reference", "auto")
         usable, facts = reference_usable(refs[0])
@@ -53,7 +53,7 @@ def run(ctx):
             # scenery or a partial figure: the image model redraws the character as a clean full-body concept;
             # this is an interpretation, so it always waits for the user's approval (gate B)
             if soft:
-                heads = float(spec.heads_tall or ctx.style.get("heads_tall", 4.6))
+                heads = float(spec.heads_tall or ctx.style.get("heads_tall", 4.5))
                 prompt = prompts.RESTYLE_REFERENCE.format(
                     heads=f"{heads:g}", head_pct=round(100 / heads), view=view, light=spec.light,
                     summary=spec.summary, must_keep=", ".join(spec.must_keep) or "-")

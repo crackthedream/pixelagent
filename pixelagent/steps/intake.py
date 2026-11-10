@@ -28,7 +28,7 @@ def run(ctx):
     elif spec.asset_type == "character":  # otherwise characters follow the project's style guide
         spec.height_px = int(style["sprite_height"])
     if spec.asset_type == "character" and style.get("look") == "soft" and not inp.get("keep_proportions"):
-        spec.heads_tall = float(style.get("heads_tall", 4.6))   # the look sets the proportions (editable at gate A)
+        spec.heads_tall = float(style.get("heads_tall", 4.5))   # the look sets the proportions (editable at gate A)
         spec.outline = "soft"
     if ctx.cfg.get("finish", {}).get("mode") == "reduce":
         # the reduce finish keeps soft shading: its colour budget is the reduction's, not the ramp palette's

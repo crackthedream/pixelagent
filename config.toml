@@ -52,9 +52,9 @@ max_unknown = 0.15           # max share of concept pixels whose map colour matc
 
 [concept]
 refine_after_pick = false    # true: after gate B, polish the picked draft with images.edit on image_final
-heads_range = [3.2, 5.2]     # soft look: a concept whose reduced figure is outside this many heads tall is redone
-proportion_retries = 1       # ... at most this many times, with a correction note (2.8 and 5.7 seen for 4.6;
-                             # the soft-look runs the owner liked measured 3.3-3.65)
+heads_range = [4.0, 5.0]     # soft look: a concept whose reduced figure is outside this many heads tall is redone
+proportion_retries = 1       # ... at most this many times, with a correction note. The owner's ratings of the ten
+                             # references (2026-11-10) were best at 4.2-5.0 heads and lowest on the chibi side.
 clean_reference = "auto"     # "auto": redraw a reference into a clean full-body concept (images.edit) when it has
                              # scenery or a partial figure; true: always also redraw; false: never (convert as is)
 
@@ -131,10 +131,10 @@ max_usd_per_asset = 3.0
 # Project style guide: every asset is built to these rules.
 light = "top-left"
 look = "soft"                # "soft": the look of hand-made anime action-game sprites (Alice in Cradle as the
-                             # reference): big head (~4.6 heads tall), light low-contrast colours, soft coloured
+                             # reference): big head (~4.5 heads tall), light low-contrast colours, soft coloured
                              # outlines, simplified costume. "classic": strict palette, dark outline, the concept's
                              # own proportions.
-heads_tall = 4.6             # character proportions for the soft look (Noel measures ~4.7 heads at ~157 px)
+heads_tall = 4.5             # character proportions for the soft look (Noel ~4.7; owner ratings best at 4.2-5.0)
 outline = "soft"             # "soft" (rim in a darker shade of the colour it encloses, no near-black line) |
                              # "selout" | "dark" | "none"
 outline_color = "#1b1325"

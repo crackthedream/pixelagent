@@ -260,14 +260,14 @@ class OpenAIBackendTests(unittest.TestCase):
         prompt = [kw for name, kw in self.client.log if name == "edit"][0]["prompt"]
         self.assertTrue(prompt.startswith("Restyle"))
         self.assertIn("do NOT keep the reference's body proportions", prompt)   # proportions lead, with numbers
-        self.assertIn("4.6 heads tall", prompt)
-        self.assertIn("22% of the full height", prompt)
-        self.assertIn("NOT a chibi", prompt)
+        self.assertIn("4.5 heads tall", prompt)
+        self.assertIn("22% of the full height", prompt)   # 100 / 4.5
+        self.assertIn("between chibi", prompt)
         self.assertIn("not pixel art", prompt)
         self.assertIn("no heavy black outlines", prompt)
         self.assertNotIn("same proportions", prompt)
         spec = json.loads(open(a.output("intake", "spec"), encoding="utf-8").read())
-        self.assertEqual((spec["heads_tall"], spec["outline"]), (4.6, "soft"))
+        self.assertEqual((spec["heads_tall"], spec["outline"]), (4.5, "soft"))
         # the critic is told the soft style is intended (no requests to cut colours or remove single pixels)
         critic = [kw for name, kw in self.client.log if name == "parse" and "senior pixel artist reviewing" in str(kw)]
         self.assertTrue(critic and "STYLE (by design" in str(critic[-1]), "critic prompt lacks the soft-style note")
@@ -285,7 +285,7 @@ class OpenAIBackendTests(unittest.TestCase):
         self.assertEqual(a.state.inputs["proportion_retries"], 1)
         note = a.state.inputs["notes"]["concept"][0]
         self.assertIn("6.2 heads tall", note)
-        self.assertIn("LARGER", note)
+        self.assertIn("clearly LARGER", note)               # 6.2 vs a 4.5 target: a clear miss, a clear fix
         edits = [kw["prompt"] for name, kw in self.client.log if name == "edit"]
         self.assertTrue(any("LARGER" in p for p in edits), "the redo's prompt carries the correction")
         self.assertIn("kept", a.state.steps["materials"].info["proportions"])

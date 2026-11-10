@@ -15,8 +15,8 @@ ground, no text. Subject: {summary}. Must keep: {must_keep}.{look}"""
 # as a description of the look, without naming any game or character, so the image model restyles rather than copies.
 LOOK_SOFT = """
 Art style (this matters as much as the design): a cute anime-style character for a 2D side-scrolling action game.
-Proportions about {heads} heads tall: a LARGE head (with the hair about a fifth of the full height; NOT chibi or
-super-deformed) with a large, soft face, big expressive anime eyes set fairly low in the face, a tiny nose and a small mouth; a small, slim body
+Proportions about {heads} heads tall: a LARGE head (with the hair about a fifth of the full height; a stylised
+game figure between chibi and realistic) with a large, soft face, big expressive anime eyes set fairly low in the face, a tiny nose and a small mouth; a small, slim body
 with short slender limbs and small hands and feet. A smooth, clean digital illustration (not pixel art, no visible
 pixels). Light, soft, pastel-leaning colours, gentle low-contrast shading, soft coloured edges, no heavy black
 outlines. Costume simplified into a few large clear shapes: keep the
@@ -37,8 +37,8 @@ separation between materials, soft single light from the {light}, no cast shadow
 RESTYLE_REFERENCE = """Restyle the character in this image into a full-body concept for a cute 2D side-scrolling
 action game.
 PROPORTIONS FIRST -- do NOT keep the reference's body proportions: the figure is about {heads} heads tall, so the
-head (with hair) is about {head_pct}% of the full height -- about one fifth, NOT a chibi or super-deformed figure
-(a head of a third of the height or more is too big). A large head and a large, soft face with big expressive
+head (with hair) is about {head_pct}% of the full height -- about one fifth: a stylised game figure between chibi
+and realistic proportions. A large head and a large, soft face with big expressive
 anime eyes set fairly low, a tiny nose and a small mouth. A small, slim body: short torso, slender legs (about 40%
 of the height), small hands and feet.
 Keep who the character is: the expression, hairstyle and hair colour, eye colour, costume colours and the signature
