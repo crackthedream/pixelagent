@@ -180,6 +180,25 @@ class ArtistLoopTests(unittest.TestCase):
                 labels[y * w + x] = "hair"
         self.assertEqual(face_region(labels, w, h), (6, 4, 8, 7))   # skin rows 5-9 (hair covers row 4), +1 px margin
 
+    def test_face_region_prefers_the_eyes_over_a_raised_hand(self):
+        # a waving hand beside the head is skin too, and can be the bigger group (benchmark ref01, 2026-11-09)
+        w, h = 40, 100
+        labels = [None] * (w * h)
+
+        def fill(x0, y0, x1, y1, name):
+            for y in range(y0, y1):
+                for x in range(x0, x1):
+                    labels[y * w + x] = name
+        fill(10, 30, 30, 95, "dress")                 # body
+        fill(14, 6, 26, 18, "skin")                    # face
+        fill(17, 10, 19, 12, "eyes")
+        fill(22, 10, 24, 12, "eyes")
+        fill(19, 14, 22, 15, "mouth")
+        fill(0, 2, 10, 26, "skin")                     # a big raised hand, separate from the face
+        x, y, bw, bh = face_region(labels, w, h)
+        self.assertTrue(x >= 10 and x + bw <= 30, (x, y, bw, bh))   # on the face, not the hand
+        self.assertTrue(y <= 10 and y + bh >= 15, (x, y, bw, bh))
+
     def test_face_region_groups_separate_features(self):
         # a mushroom-like face: no skin, separate eye / eye / mouth / blush marks on a "body" material
         w, h = 30, 40

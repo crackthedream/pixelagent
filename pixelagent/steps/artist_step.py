@@ -17,11 +17,21 @@ def mode(ctx):
 
 
 def run(ctx):
-    if mode(ctx) != "artist":
+    if mode(ctx) not in ("artist", "reduce"):
         ctx.skipped = True
         ctx.info["reason"] = "[finish] mode is not 'artist'"
         return
     doc = ctx.load_project("polish")
+    fix = ctx.asset.state.inputs.get("fix")
+    if mode(ctx) == "reduce" and not (fix and os.path.exists(os.path.join(ctx.asset.path(fix.get("from_project", "")),
+                                                                         "project.json"))):
+        # the reduction is the sprite: no drawing and no face pass (docs/FACE_ROOT_CAUSE.md). It is passed through as
+        # this step's result, so a note at the review (or Revise) has the model edit THIS sprite, versions work as usual
+        ctx.asset.state.inputs.pop("fix", None)
+        ctx.save_project("project", doc)
+        ctx.save_image("preview", "artist.png", imaging.from_bytes(doc.w, doc.h, doc.composite()))
+        ctx.info["reason"] = "[finish] mode = reduce: the reduction is the sprite (no drawing)"
+        return
     trace = ctx.save_image("trace", "trace.png", imaging.from_bytes(doc.w, doc.h, doc.composite()))
     from ..models import StubLLM
     if isinstance(ctx.backend.llm, StubLLM):
@@ -48,13 +58,6 @@ def run(ctx):
             crop = regions.concept_crop(imaging.load_rgba(concept_path), geom, face, pad=2)
             if crop is not None:
                 cface = ctx.save_image("concept_face", "concept_face.png", crop)
-            if fcfg.get("face_trace", False):
-                # the face inside the trace rebuilt from the concept, keeping eyes, brows and mouth (pixelagent.face)
-                from ..face import face_trace
-                ft, changed = face_trace(imaging.load_rgba(trace), imaging.load_rgba(concept_path), geom,
-                                         lm["labels"], lm["width"], face)
-                trace = ctx.save_image("trace", "trace.png", ft)
-                ctx.info["face_trace_cells"] = changed
     from ..artist import run_artist
     palette = ["#%02x%02x%02x" % v[:3] for v in doc.palette.values() if v[3] > 0]
     # a drawing that a spending limit stopped earlier is continued, not started over (finding F06)
@@ -94,9 +97,9 @@ def run(ctx):
                    out_dir=ctx.path("agent"),
                    max_usd=float(fcfg.get("revise_max_usd", 0.30) if revise else fcfg.get("max_usd", 1.5)),
                    max_turns=int(fcfg.get("max_turns", 40)), face_turns=int(fcfg.get("face_turns", 12)),
-                   effort=fcfg.get("effort", "medium"), phases=phases,
+                   effort=fcfg.get("effort", "medium"), phases=phases, look=ctx.style.get("look"),
                    face=face, concept_face=cface, notes=None if revise else ctx.notes(), log=ctx.log, start_project=start,
-                   live=LivePreview(ctx.asset.dir, "artist"), face_rules=fcfg.get("face_rules", "v1"),
+                   live=LivePreview(ctx.asset.dir, "artist"), face_rules=fcfg.get("face_rules", "v3"),
                    revise=revise, revise_turns=int(fcfg.get("revise_turns", 12)))
     if "stopped:" in s["stop"] or "cancelled" in s["stop"]:
         # a spending limit or the user stopped the model: keep its drawing for later, and never pass a half-done
@@ -114,6 +117,17 @@ def run(ctx):
                              "Settings and choose Try again to continue it")
     shutil.rmtree(ckpt_dir, ignore_errors=True)
     drawn = ctx.projectio.load_project(s["project"])
+    if not revise and fcfg.get("cleanup", True):
+        # speckle cleanup on the finished drawing, as its own top layer (pixelagent/cleanup.py)
+        from ..cleanup import cleanup_overlay
+        with open(ctx.input("materials", "labelmap"), encoding="utf-8") as f:
+            lmc = json.load(f)
+        if (lmc["width"], lmc["height"]) == (drawn.w, drawn.h):
+            overlay, n = cleanup_overlay(ctx.art, drawn.w, drawn.h, bytes(drawn.composite()), lmc["labels"], face=face,
+                                         min_size=int(fcfg.get("cleanup_min_cluster", 3)))
+            if n:
+                drawn.layers.append(ctx.canvas.Layer("cleanup", drawn.w, drawn.h, data=overlay))
+            ctx.info["cleanup_pixels"] = n
     if revise and revise["box"]:
         from ..revise import confine
         ctx.info["restored_outside_area"] = confine(drawn, ctx.projectio.load_project(base), revise["box"])

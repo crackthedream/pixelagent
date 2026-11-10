@@ -117,37 +117,69 @@ class EngineTests(unittest.TestCase):
 
 
 class PipelineTests(Base):
-    def test_reference_dry_run_auto(self):
-        self.proj.new_asset("hero", {"references": [self.ref], "height": 48})
-        status = Pipeline(self.proj, "hero").run(auto_approve=True, log=quiet)
-        self.assertEqual(status, "complete")
-        a = self.proj.asset("hero")
-        png = a.output("export", "png")
-        im = imaging.load_rgba(png)
-        bbox = imaging.content_bbox(im, 1)
-        self.assertLessEqual(bbox[3] - bbox[1], 48, "sprite incl. outline must fit the requested height")
-        self.assertGreaterEqual(bbox[3] - bbox[1], 46)
-        self.assertTrue(bbox[0] >= 2 and bbox[1] >= 2 and im.width - bbox[2] >= 2 and im.height - bbox[3] >= 2,
-                        "canvas_margin must stay free around the outline")
+    def _export_lint(self, a, max_colors):
+        im = imaging.load_rgba(a.output("export", "png"))
         data = imaging.to_bytes(im)
         res = art.lint(im.width, im.height, data,
                        palette=[tuple(int(v[i:i + 2], 16) for i in (1, 3, 5))
                                 for v in json.loads(rd(a.output("export", "meta")))["palette"].values()],
-                       max_colors=32)
+                       max_colors=max_colors)
+        return im, data, res
+
+    def test_reference_dry_run_auto(self):
+        # the default finish: the reduction is the sprite (soft look, docs/FACE_ROOT_CAUSE.md)
+        self.assertEqual(self.proj.config["finish"]["mode"], "reduce")
+        self.proj.new_asset("hero", {"references": [self.ref], "height": 48})
+        status = Pipeline(self.proj, "hero").run(auto_approve=True, log=quiet)
+        self.assertEqual(status, "complete")
+        a = self.proj.asset("hero")
+        budget = int(self.proj.config["finish"]["reduce_colors"])
+        im, data, res = self._export_lint(a, budget + 40)
+        bbox = imaging.content_bbox(im, 1)
+        self.assertLessEqual(bbox[3] - bbox[1], 48, "the sprite must fit the requested height")
+        self.assertGreaterEqual(bbox[3] - bbox[1], 46)                   # no outline ring: the figure uses it all
+        self.assertTrue(bbox[0] >= 2 and bbox[1] >= 2 and im.width - bbox[2] >= 2 and im.height - bbox[3] >= 2,
+                        "canvas_margin must stay free around the sprite")
         self.assertEqual(res["metrics"]["semi_transparent"], 0)
         self.assertEqual(res["metrics"]["off_palette"], 0)
-        self.assertLessEqual(res["metrics"]["colors"], 32)
+        self.assertGreater(res["metrics"]["colors"], 40)                 # soft shading keeps many shades...
+        self.assertLessEqual(res["metrics"]["colors"], budget + 40)      # ...within the budget (+ per-material minimums)
+        oc = self.proj.config["style"]["outline_color"]
+        oc = tuple(int(oc[i:i + 2], 16) for i in (1, 3, 5))
+        self.assertNotIn(oc, {tuple(data[k:k + 3]) for k in range(0, len(data), 4) if data[k + 3]})
         self.assertEqual(res["metrics"]["components"], 1, "sprite should be one connected shape")
-        self.assertTrue(os.path.exists(os.path.join(a.dir, "review", "index.html")))
-        self.assertEqual(a.state.steps["detail"].status, "skipped")     # artist finish mode (default)
-        self.assertIn("dry_run", a.state.steps["artist"].info)
-        doc = projectio.load_project(a.output("export", "project"))
-        names = [l.name for l in doc.layers]
-        self.assertIn("lines", names)
-        self.assertIn("polish", names)
+        st = a.state.steps
+        self.assertEqual(st["rebuild"].info["mode"], "reduce")
+        self.assertEqual((st["lines"].status, st["detail"].status), ("skipped", "skipped"))
+        self.assertEqual(st["artist"].status, "done")                    # the reduction passed through as the result
+        self.assertIn("reduce", st["artist"].info["reason"])
+        for m, k in st["rebuild"].info["colors_per_material"].items():   # eyes and mouth keep their own colours
+            if "eye" in m or "mouth" in m:
+                self.assertGreaterEqual(k, 1, m)
         calls = [json.loads(l) for l in rd(os.path.join(self.root, "costs.jsonl")).splitlines()]
         self.assertTrue(calls and all(c["model"] == "stub" for c in calls))
         self.assertEqual({c["role"] for c in calls if c["kind"] == "llm"}, {"director", "vision_pick", "critic"})
+        self.assertTrue(os.path.exists(os.path.join(a.dir, "review", "index.html")))
+
+    def test_artist_finish_dry_run(self):
+        # the drawing finish (classic): ramp palette, outline ring, polish; a stub model passes the trace through
+        self.proj.config["finish"]["mode"] = "artist"
+        self.proj.new_asset("hero", {"references": [self.ref], "height": 48})
+        self.assertEqual(Pipeline(self.proj, "hero").run(auto_approve=True, log=quiet), "complete")
+        a = self.proj.asset("hero")
+        im, data, res = self._export_lint(a, 40)
+        bbox = imaging.content_bbox(im, 1)
+        self.assertLessEqual(bbox[3] - bbox[1], 48, "sprite incl. outline must fit the requested height")
+        self.assertGreaterEqual(bbox[3] - bbox[1], 46)
+        self.assertEqual(res["metrics"]["semi_transparent"], 0)
+        self.assertEqual(res["metrics"]["off_palette"], 0)
+        self.assertLessEqual(res["metrics"]["colors"], 40)
+        self.assertEqual(res["metrics"]["components"], 1, "sprite should be one connected shape")
+        self.assertEqual(a.state.steps["detail"].status, "skipped")
+        self.assertIn("dry_run", a.state.steps["artist"].info)
+        names = [l.name for l in projectio.load_project(a.output("export", "project")).layers]
+        self.assertIn("lines", names)
+        self.assertIn("polish", names)
         self.assertEqual(a.state.steps["materials"].info["label_source"], "material map")
 
     def test_manual_gates_prompt_path(self):
@@ -204,7 +236,8 @@ class PipelineTests(Base):
     def test_default_height_follows_style_and_explicit_wins(self):
         self.proj.new_asset("d1", {"prompt": "a hero"})
         self.proj.new_asset("d2", {"prompt": "a hero", "height": 48})
-        for aid, want in (("d1", 96), ("d2", 48)):
+        style_default = int(self.proj.config["style"]["sprite_height"])
+        for aid, want in (("d1", style_default), ("d2", 48)):
             Pipeline(self.proj, aid).run(until="intake", auto_approve=True, log=quiet)
             spec = json.loads(rd(self.proj.asset(aid).output("intake", "spec")))
             self.assertEqual(spec["height_px"], want)

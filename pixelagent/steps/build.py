@@ -17,7 +17,108 @@ def _palette_from_materials(ctx, mats):
     return pal
 
 
+def finish_mode(ctx):
+    return ctx.cfg.get("finish", {}).get("mode", "artist")
+
+
+# materials whose few pixels carry the character's identity: they always get their own colours
+FOCAL = ("eye", "iris", "pupil", "lash", "mouth", "lip", "tongue", "teeth", "blush", "cheek", "brow")
+
+
+def _oklab(rgb):
+    """sRGB (N, 3) 0-255 -> OKLab (N, 3)."""
+    import numpy as np
+    c = rgb / 255.0
+    c = np.where(c <= 0.04045, c / 12.92, ((c + 0.055) / 1.055) ** 2.4)
+    lms = c @ np.array([[0.4122214708, 0.5363325363, 0.0514459929],
+                        [0.2119034982, 0.6806995451, 0.1073969566],
+                        [0.0883024619, 0.2817188376, 0.6299787005]]).T
+    lms = np.cbrt(lms)
+    return lms @ np.array([[0.2104542553, 0.7936177850, -0.0040720468],
+                           [1.9779984951, -2.4285922050, 0.4505937099],
+                           [0.0259040371, 0.7827717662, -0.8086757660]]).T
+
+
+def _kmeans(x, k, iters=12):
+    """Small k-means in OKLab, seeded along lightness so dark lines and highlights get their own centres."""
+    import numpy as np
+    order = np.argsort(x[:, 0])
+    centres = x[order[np.linspace(0, len(x) - 1, k).astype(int)]].copy()
+    assign = np.zeros(len(x), int)
+    for _ in range(iters):
+        d = ((x[:, None, :] - centres[None, :, :]) ** 2).sum(-1)
+        assign = d.argmin(1)
+        for j in range(k):
+            m = assign == j
+            if m.any():
+                centres[j] = x[m].mean(0)
+    return assign
+
+
+def soft_reduce(ctx):
+    """Finish mode 'reduce' (the soft look): the final sprite comes from the concept's own reduction onto the grid
+    (pixelize), which keeps the face, the eye colours and the soft shading that the model's redraw and a 40-colour
+    ramp palette lost (docs/FACE_ROOT_CAUSE.md). Each material gets its own colours by k-means in OKLab -- a share of
+    the budget by the square root of its area, at least 4 for focal materials (eyes, mouth, blush), so small
+    features keep their colour -- then only near-identical specks merge."""
+    import numpy as np
+    canvas = ctx.canvas
+    base = imaging.load_rgba(ctx.input("pixelize", "pixel_base"))
+    w, h = base.size
+    with open(ctx.input("materials", "materials"), encoding="utf-8") as f:
+        mats = json.load(f)["materials"]
+    with open(ctx.input("materials", "labelmap"), encoding="utf-8") as f:
+        labels = json.load(f)["labels"]
+    src = np.asarray(base).reshape(-1, 4)
+    budget = int(ctx.cfg.get("finish", {}).get("reduce_colors", 96))
+    groups = {}
+    for k, m in enumerate(labels):
+        if m is not None and src[k, 3]:
+            groups.setdefault(m, []).append(k)
+    weight = {m: len(ix) ** 0.5 for m, ix in groups.items()}
+    total = sum(weight.values()) or 1.0
+    out = np.zeros_like(src)
+    palette, counts = {}, {}
+    for m, ix in groups.items():
+        ix = np.array(ix)
+        rgb = src[ix, :3].astype(float)
+        focal = m.lower().replace("-", "_").startswith(FOCAL) or any(f in m.lower() for f in ("eye", "mouth"))
+        k = max(4 if focal else 2, round(budget * weight[m] / total))
+        uniq = np.unique(rgb, axis=0)
+        k = int(min(k, len(uniq)))
+        assign = _kmeans(_oklab(rgb), k) if k > 1 else np.zeros(len(ix), int)
+        for j in range(k):
+            sel = assign == j
+            if not sel.any():
+                continue
+            col = np.clip(np.round(rgb[sel].mean(0)), 0, 255).astype(np.uint8)
+            out[ix[sel], :3] = col
+            out[ix[sel], 3] = 255
+            palette[f"{m}{j}"] = (int(col[0]), int(col[1]), int(col[2]), 255)
+        counts[m] = k
+    data = bytearray(out.astype(np.uint8).tobytes())
+    merged = ctx.art.merge_small_clusters(w, h, data, labels, min_size=2, max_dl=0.04)
+    order = [m["name"] for m in sorted(mats, key=lambda m: m["pixels"])]
+    order.reverse()
+    order += [m for m in groups if m not in order]
+    layers = ctx.art.split_by_labels(w, h, data, labels, order)
+    doc = canvas.Document(ctx.asset.id, w, h)
+    doc.layers = []
+    ref = canvas.Layer("concept (reference)", w, h, imaging.to_bytes(base))
+    ref.reference, ref.visible, ref.opacity = True, False, 0.5
+    doc.layers.append(ref)
+    for name in order:
+        if name in layers:
+            doc.layers.append(canvas.Layer(name, w, h, layers[name]))
+    doc.palette = palette
+    ctx.save_project("project", doc)
+    ctx.save_image("preview", "rebuild.png", imaging.from_bytes(w, h, doc.composite()))
+    ctx.info.update(mode="reduce", colors=len(palette), colors_per_material=counts, specks_merged=merged)
+
+
 def rebuild(ctx):
+    if finish_mode(ctx) == "reduce":
+        return soft_reduce(ctx)
     art, canvas = ctx.art, ctx.canvas
     from canvas import parse_hex
     base = imaging.load_rgba(ctx.input("pixelize", "pixel_base"))
@@ -107,6 +208,12 @@ def lines(ctx):
     from canvas import parse_hex
     doc = ctx.load_project("rebuild")
     style = ctx.spec().outline
+    if finish_mode(ctx) == "reduce":
+        # the concept's own soft edges are kept; an added outline ring would harden the soft look
+        ctx.skipped = True
+        ctx.info["reason"] = "[finish] mode = reduce keeps the concept's own edges"
+        ctx.save_project("project", doc)
+        return
     if style == "none":
         ctx.skipped = True
         ctx.info["reason"] = "spec.outline = none"
@@ -118,19 +225,49 @@ def lines(ctx):
     tmp.layers[0].cels[0] = bytearray(before)
     canvas.Painter(tmp, 0).outline(oc, clean=True)
     data = tmp.layers[0].cels[0]
-    doc.palette["outline"] = oc
     merged = 0
-    if style == "selout":
+    if style in ("selout", "soft"):
+        # soft: a gentler rim from the materials' own shades only -- the near-black outline colour is not offered,
+        # so no black line runs around the figure (the look of hand-made anime action-game sprites)
         pal = [v[:3] for v in doc.palette.values()]
-        art.selout(doc.w, doc.h, data, 0.3, ctx.spec().light, art.Matcher(pal))
+        if style == "selout":
+            doc.palette["outline"] = oc
+            pal.append(oc[:3])
+        art.selout(doc.w, doc.h, data, 0.3 if style == "selout" else 0.2, ctx.spec().light, art.Matcher(pal))
         # sel-out picks each outline pixel's colour from what lies behind it; along a line that flickers
         # between shades. Merge runs shorter than 3 px along the outline ring into their neighbours.
         ring = ["ring" if data[k * 4 + 3] and not before[k * 4 + 3] else None for k in range(doc.w * doc.h)]
         merged = art.merge_small_clusters(doc.w, doc.h, data, ring, min_size=3, max_dl=0.25, connectivity=8)
+        if style == "soft":
+            _no_black_ring(art, doc.w, doc.h, data, tuple(oc[:3]), art.Matcher(pal))
+    else:
+        doc.palette["outline"] = oc
     changed, _ = _overlay(ctx, doc, data, "lines")
     ctx.save_project("project", doc)
     ctx.save_image("preview", "lines.png", imaging.from_bytes(doc.w, doc.h, doc.composite()))
     ctx.info.update(line_pixels=changed, outline_runs_merged=merged)
+
+
+def _no_black_ring(art, w, h, data, oc, matcher):
+    """Soft outline: ring pixels the sel-out did not reach (it only recolours the silhouette edge) still hold the
+    near-black outline colour; give each a darker shade of its most common neighbour from the palette instead."""
+    for y in range(h):
+        for x in range(w):
+            k = (y * w + x) * 4
+            if not data[k + 3] or tuple(data[k:k + 3]) != oc:
+                continue
+            cnt = {}
+            for dy in (-1, 0, 1):
+                for dx in (-1, 0, 1):
+                    xx, yy = x + dx, y + dy
+                    if (dx or dy) and 0 <= xx < w and 0 <= yy < h:
+                        j = (yy * w + xx) * 4
+                        c = tuple(data[j:j + 3])
+                        if data[j + 3] and c != oc:
+                            cnt[c] = cnt.get(c, 0) + 1
+            if cnt:
+                base = max(cnt, key=cnt.get)
+                data[k:k + 3] = bytes(matcher.nearest(art.shade_color(base, -0.2))[:3])
 
 
 def _pair_matcher(art, palette):
@@ -158,6 +295,13 @@ def polish(ctx):
     art = ctx.art
     det = ctx.asset.state.steps.get("detail")
     doc = ctx.load_project("detail" if det and det.status == "done" and "project" in det.outputs else "lines")
+    if finish_mode(ctx) == "reduce":
+        # anti-aliasing against ramp pairs and orphan removal would undo the soft reduction (its single pixels are
+        # deliberate shading); the reduction is the finished sprite
+        ctx.save_project("project", doc)
+        ctx.save_image("preview", "polish.png", imaging.from_bytes(doc.w, doc.h, doc.composite()))
+        ctx.info["reason"] = "[finish] mode = reduce: passed through"
+        return
     data = doc.composite()
     orig = bytes(data)
     aa = art.antialias(doc.w, doc.h, data, 0.5, _pair_matcher(art, doc.palette))

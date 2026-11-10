@@ -243,7 +243,8 @@ one sample each, rated blind by the owner (1st/2nd/3rd; $1.71 for 15 passes, ~$0
 | B: face trace (`pixelagent/face.py`), rules v1 | 2.20 | 1/5 | Lantern Keeper |
 | C: face trace + rules v2 (feature sizes from the face trace, colour rules) | 2.20 | 2/5 | engineer, mushroom |
 
-Decision: **keep A as the default** (`[finish] face_trace = false`, `face_rules = "v1"`; both switches exist).
+Decision then: **keep A as the default**. Variants B and C (the face trace and rules v2) were removed later
+(2026-11-09 cleanup); the face kit (rules v3) replaced this line of work.
 Reading: C wins on big, high-contrast faces (a grin, chibi eyes) and loses on subtle anime faces, where the face
 trace is ragged and misleads; with five characters and one sample each this is a hint, not a finding. A next round
 would test C only for faces whose concept has strong features (measurable from the face trace's dark-cell share),
@@ -256,12 +257,156 @@ every earlier round and image; it now starts a fresh conversation as in the face
 96-px character should cost about $1.15. Result: clear silhouette, lantern and scarf read well; the face (eyes and
 mouth merging into dark marks at 1x) is still the weak point, as the critic also said.
 
+**Face kit redesign from Alice in Cradle** (2026-11-09). The owner found the v3 kit's eyes and mouths
+structurally odd and pointed to the game. Its sprite atlases (Unity bundles; read locally, nothing copied into the
+project) show one construction on every character (sprites about 150 px tall, faces 16-18 px wide):
+- **Lash.** A strong dark lash on top, 4-6 px, its outer end softened into a wing that drops a pixel.
+- **Iris.** It hangs under the lash as a vertical band (2-3 px wide, 3-4 tall): dark at the top, lighter at the
+  bottom, one white highlight. A 1-px white of the eye shows beside it on the outer side. No lower outline, no box,
+  no fade: the eye simply ends.
+- **Size and layout** (measured over 261 Noel faces): eye blob about 6×5 px on a 17-px face, gap about one eye
+  width, and the eyes sit low, about 5 px from the eye bottom to the chin.
+- **Expressions** come from the lash: lowered (half), slanting up to the inner end (sad), slanting down to the inner
+  end (angry), ^ arcs (happy), a soft line (closed), more white (surprised).
+- **Brows, nose, mouth.** No brows (the fringe hides them) and no nose. Mouths are soft: none or a line just darker
+  than the skin when calm, a small salmon blob when open, never a dark outline.
+
+The kit (`pixelliner-mcp/face_kit.py`) now builds exactly that:
+- eye sizes s 3×3, m 4×4, l 5×5, xl 6×6, with the default gap equal to the eye width;
+- styles open, half, happy, closed, wide, sad, angry and winks;
+- mouth colours mixed from the skin, which is sampled from the canvas or passed as `skin`;
+- mouths none, line, smile, a round open smile, o, frown.
+
+This took three passes. The first version (a lash turning down the outer corner, the iris fading into the skin)
+still looked odd to the owner. A catalogue of all of Noel's faces showed what was missing: the eye white and the
+vertical iris band.
+
+**Third pass: a same-scale comparison with Noel** (owner: "the eyes still look quite odd"). The round-5 faces were
+put next to Noel's at native pixels. The causes were in all three areas:
+
+| Area | Noel | Ours (round 5) | Fix |
+|---|---|---|---|
+| Structure | Eye taller than wide; the lash continues down the outer side and encloses a soft white; pupil low, toward the nose | 4 wide × 3 visible; the white touched bare skin and read as a hole or a sideways glance | New templates (m 5×4, l 6×5, xl 7×6), exactly mirrored |
+| Size and position | Eyes plus gap span almost the face width; eyes low under the fringe | The model chose size m for every 18–19-px face | `pixelagent/face.py face_layout` measures the face (skin width, fringe line, chin, centre) and the face pass gets the kit's size, gap and positions |
+| Turned heads | The far eye of a three-quarter face is narrower | Two identical eyes on a turned head | `turn: left/right` narrows the far eye |
+| Pixel work | Mid-tone iris, dark pupil, soft greyed lash ends, flat clean skin | Near-black lash beside pure white, bright flat irises (ref10 read as goggles), blotchy traced skin | Tinted white; the iris body is held to a mid tone with the light colour kept for the lower iris; new `skin` op flattens the face |
+
+The model also added hard dark brows on two faces. Brows are now faint by default and the rules say to leave them
+out. Free previews on the round-5 sprites showed the faces clearly closer to Noel.
+
+**Full runs with the third-pass kit** (2026-11-10, owner-approved; `retrace_height.py`, ref01 / ref03 / ref05 at
+160 px reusing their concepts). They cost $1.27 / $1.11 / $1.16, **$3.54 in total**: drawing 38-40 rounds, against
+21 in the first 160-px run. Critique scores were 31.6 / 26.2 / 34.1. All three read as anime faces at game size and
+are clearly better than the 96-px versions. The model used the measured layout, the `skin` op and `turn` on the
+three-quarter faces. ref03 (a small three-quarter face) is the weakest. The face-only test rounds had started from
+raw traces, which is why their faces looked pasted on: judge faces on full runs. The app's 160-px estimate was
+raised to $1.50.
+
+**The soft look: the whole character in the game's style** (2026-11-10). The owner still found the faces odd, and
+named the real target: characters with the aesthetic of Alice in Cradle, with less effort in the body. Measured at
+the same pixel scale:
+
+| | Alice in Cradle (Noel, an NPC) | Ours, 160 px |
+|---|---|---|
+| Proportions | ~4.7 heads tall (157-px figure, 32-34-px head), large hair volume, small slim body | 5.5-7 heads, realistic adult bodies |
+| Face width | 18-19 px, ~12% of the height | 13-16 px, ~8-10% |
+| Brightness (mean luminance) | 193-211, few dark pixels | 95-161 |
+| Lines | soft, coloured; no dark ring around the figure | a near-black sel-out ring (#1b1325) |
+| Colours | hundreds of soft blended shades | 31-34 |
+
+The proportions decide the face size: at 6-7 heads a face gets too few pixels whatever the face kit does.
+
+`[style] look = "soft"` (the default; `"classic"` restores the old behaviour) sets the whole style:
+- **Concept prompts** gain `prompts.LOOK_SOFT`, a description of the look that names no game or character, so the
+  image model restyles rather than copies. It asks for ~4.6 heads tall, a large head and face with big eyes set
+  low, a small slim body, light pastel low-contrast colours, soft coloured edges and a simplified costume.
+- **References:** every reference is restyled. The redraw keeps identity (hair, eye colour, costume colours,
+  signature accessories) but no longer the reference's proportions or every costume detail. The restyled concept
+  comes first and the reference stays a candidate at gate B.
+- **Spec:** `heads_tall` is set from `[style] heads_tall = 4.6`, editable at gate A; `keep_proportions` in the
+  inputs opts out.
+- **Outline:** a new `outline = "soft"` mode draws a gentler sel-out (0.2) from the materials' own shades. The
+  near-black outline colour is not offered, and leftover ring pixels get a darker neighbour shade
+  (`build._no_black_ring`).
+- **Palette and drawing:** `max_colors` went from 32 to 40. The drawing instructions gain `artist.LOOK_RULES["soft"]`:
+  light colours, gentle shading, outlines in a darker shade of the colour they enclose, a large face, and small
+  details simplified.
+
+**Concept test** (owner-approved, $0.44 for six concepts at $0.074 each; `bench_runs_soft`, ref01 / ref03 / ref05).
+- **First prompt:** the style text came after "keep the identity". ref01 restyled strongly but came out pixelated;
+  ref03 kept its realistic ~7 heads and ref05 changed only a little. An image edit anchors strongly on the
+  reference's proportions.
+- **Fix:** `prompts.RESTYLE_REFERENCE` (the soft look's redraw) puts the proportions FIRST, with numbers: "do NOT
+  keep the reference's body proportions", about 4.6 heads, head about 22% of the height, legs about 40%. It also
+  asks for a smooth illustration, not pixel art.
+- **Second round:** all three came out about 4 heads tall with big faces, soft colours and identity kept, ref03
+  included.
+- **Drawn at 160 px** (owner-approved): drawing $0.74-1.40 each; with concepts $1.54 / $1.47 / $0.89. Critique
+  scores were 50.3 / 44.2 / 53.1, against 31.6 / 26.2 / 34.1 for the realistic 160-px versions. Big heads, light
+  palette, no black ring, simpler bodies: clearly toward the game's look.
+- **New problem:** the eyes were too small. The faces grew to 24-30 px, but the kit's biggest eye (xl 7×6) was
+  sized for Noel's 18-px face. Added `xxl` (9×7) for faces 22 px and wider.
+- **Measurement fixes in `face_layout`:**
+  - skin runs bridge gaps up to 10 px, so a 7-9-px eye no longer splits the face and puts the chin at eye level;
+  - the eye-bottom-to-chin distance is proportional (~0.28 × face width, 4-9 px);
+  - an implausibly short face (turned, or partly hidden by hair) gets the chin estimated from its width.
+- **Free preview:** xxl eyes at the measured place look clearly right on ref01 and ref05. ref03 (three-quarter view,
+  hair across the face) still measures poorly; the model's own placement is better there.
+- **Face pass rerun** (owner-approved, face lab round r6, $0.36, 9 rounds each): the model used xxl eyes at the
+  measured place, and `turn` on the two three-quarter faces. ref03 improved most (clean, well-placed eyes); ref01 and
+  ref05 have eyes about a third of the face width.
+- **Remaining gaps:** the concept eyes have bright catchlights and ours have none (the separate highlight was
+  dropped against the sideways-glance look), so the eyes read a little flat. Expressions are milder than the
+  concepts (ref01 laughs in the concept, only smiles in the sprite). Next idea: a 1-2 px catchlight in the upper
+  iris on the inner side for xl/xxl eyes, mirrored.
+
+**Root-cause analysis (2026-11-10): see `docs/FACE_ROOT_CAUSE.md`.** The face is good right after the plain
+reduction (step 4) and is degraded by the palette step (eye colours starved), the model's redraw (the largest
+drift) and the template face pass. Keeping the reduction's face gave the best faces of the project. The proposed
+direction was to protect the face. After the owner confirmed it, the whole sprite now comes from the reduction:
+`[finish] mode = "reduce"` (default) uses per-material k-means colours (96), no outline ring and no model
+drawing; the drawing step passes the result through, so revise and gate-C notes still work. About $0.15-0.20
+per character. Section 4 of FACE_ROOT_CAUSE.md has the details.
+
+Rules v3 (`FACE_INSTRUCTIONS_V3`) were rewritten to match. The old v3 kit (box eyes: a full-width lash, a dark iris
+row and a light bottom row; dark red "v" mouths) lost its iris colour under the dark top rows and read as an
+emoticon.
+
+**Resolution matters more than the kit.** The owner still found the faces uncanny and suggested more pixels. To
+test it for free, five reference runs were retraced at 96, 128 and 160 px. The material map is reused (it is made at
+concept resolution); only pixelize → polish was redone, in stand-in mode. The kit was then stamped on each.
+
+| Height | Face width | Eye size | How it reads |
+|---|---|---|---|
+| 96 px | 9–10 px | s (3×3) | Crude; happy eyes turn to dots |
+| 128 px | 12–14 px | m | In between |
+| 160 px | about 16 px | l, with `xl` (6×6) added for 20 px and wider | Natural (Alice in Cradle's scale: ~150-px sprites, 16–18-px faces) |
+
+The owner's idols are 5.5–7 heads tall, so their faces are smaller at a given height than AIC's chibi-like 4.5 heads.
+
+The app only offers 64/96/128 (`server.py` settings validation, ESTIMATES, three segmented controls in `app.js`).
+**Paid check at 160 px (owner-approved, $1.00 total).**
+- **Face lab round 4** (`benchmarks/face_lab_runs/r4`): rules v3 on five 160-px traced sprites. It cost $0.38,
+  6-8 rounds each. Every face beat today's 96-px model faces; ref10's `o` mouth was a plus sign, now a soft 2×2 blob.
+- **Full character** (`benchmarks/retrace_height.py`, ref01 at 160 px reusing its concept and map). It cost $0.62
+  in 247 s: drawing 21 rounds $0.50, face pass 9 rounds $0.11. The 96-px run was $0.61 in 400 s. Lint 31.7 against
+  28.8. Costume, hands and face all clearly better; the eyes came out slightly heavy-lidded for a happy concept.
+
+**Decision:** the default height is now **160 px** (`config.toml`, app settings default, 160 added to the app's
+height choices, ESTIMATES 160 = $1.30 with headroom). The default face rules are now **v3** (face kit). An existing
+`~/.pixelagent/settings.json` keeps its saved height until the owner picks 160 in Settings. Animation cost per
+frame at 160 px is not measured yet.
+
 **Animation, first real run** (Mushroom Traveler, 96 px, 6-frame walk): plan + pose sheet $0.07, drawing $1.46
 (69 rounds), **$1.53 total**. The palette was identical (25 colours) in all frames, and the opaque-area spread
 was 3.3 %. The owner approved and exported it.
 
-**Spend recorded in the current benchmark logs:** about $9 (`bench_runs` $2.91, `bench_runs_96` $6.08). Earlier
-runs were cleaned up.
+**Cleanup (2026-11-09, owner request).** Old samples were removed recoverably:
+- **Recycle Bin:** the 64-px and 96-px benchmark runs (`bench_runs`, `bench_runs_96`, about $9 of runs), face-lab
+  rounds r1-r3 and the build cache.
+- **App:** the 96-px "Lantern Keeper" and its walk animation went to Recently Deleted.
+- **Kept:** `bench_runs_refs` (the ten owner references at 96 px; their concepts let `retrace_height.py` redo any of
+  them at 160 px for ~$0.60), `bench_runs_160` and face-lab round r4.
 
 ---
 
@@ -387,7 +532,7 @@ Poses, Frame traces, Drawing frames, Your approval, Export.
 
 ## 11. Tests
 
-99 `unittest` tests in `tests/`, all free (dry-run mode or scripted fake models):
+103 `unittest` tests in `tests/`, all free (dry-run mode or scripted fake models):
 
 | File | Tests | Covers |
 |---|---|---|
@@ -423,6 +568,37 @@ materials, and the artist step is skipped in dry-run mode. Visual quality can on
 - **First real area fix** (Lantern Keeper's face, 15 x 14 px area): 7 rounds, **$0.10 in 82 s** (a full redraw:
   ~$0.90, ~5 min); exactly 15 pixels changed, all inside the area; the eyes and smile became readable at 1x.
 - Stop messages: a spending stop reads "Stopped at a spending limit" with a link to Settings.
+
+## 11c. Reference baseline (2026-11-09): 10 owner references, real models
+
+Ten anime-style character references from the owner (`benchmarks/refs/owner/`, git-ignored: third-party art used
+for testing only; case list `benchmarks/cases_refs.csv`; results `bench_runs_refs/`). Six are half-body or seated,
+all ten have scenery.
+
+**Found before running (fixed):** the reference path converted the reference as it was; it only removes plain
+backgrounds, so all ten would have turned their whole scene into the sprite (figure "coverage" 66-100%, touching
+the image edges). Now `[concept] clean_reference = "auto"` checks each reference (`concept.reference_usable`:
+coverage <= 60%, no edge contact) and otherwise has the image model redraw the character as a clean full-body
+concept (identity, colours and costume kept; partial or seated figures completed as standing), guided by the
+plan's summary and must-keep list. A redrawn concept always waits at gate B for the owner's approval.
+
+**Results:** 10/10 complete; **$6.44 total, median $0.66 per character** (max $0.74), including the concept
+redraw; **median 6.4 min** (max 6.9). The redrawn concepts were faithful in all ten. Sprites: recognisable
+characters and costumes; the weak spot was **noise** (critic median 6.2, lint median 33).
+
+**Noise, root cause:** measured trace vs drawing, the artist cleans prompt-made concepts (isolated pixels 209 -> 94)
+but not anime concepts (131 -> 123) and adds shade flicker (neighbour shade changes 0.44 -> 0.54): it chases
+linework and folds that cannot survive at 96 px. **Fix:** `pixelagent/cleanup.py` merges tiny near-shade specks
+within a material after the drawing, as its own `cleanup` layer; the face, transparent pixels and real contrast
+(highlights, buttons, creases) are never touched (`[finish] cleanup = true`). On the ten drawings: lint 33.4 -> 40.8,
+isolated pixels 123 -> 81, shade changes 0.538 -> 0.471 (offline, same drawings).
+
+**Face box (fixed):** the waving idol's face pass had worked on her raised hand (a hand is skin too, and was the
+bigger group). `face_region` now picks the group holding the eye/mouth labels and sizes the box around them; with
+no such labels it keeps a face-sized box (18% of the figure's height) from the top of the group.
+
+Still open from this baseline: owner ratings of the ten sprites (not done), a second sample per reference to
+measure run-to-run variation, and a rerun with the cleanup and face-box fixes in place (about $6.50).
 
 ## 11b. Review of `de5e3a2` (Codex, 2026-11-09): all 11 findings fixed
 
@@ -492,14 +668,11 @@ an animation-listing bug.
    `config.toml [pricing]`).
 
 ### Next: quality
-5. **Reference-image benchmark.**
-   - About 10 reference images in `benchmarks/refs`. Evaluate `[concept] clean_reference` on and off,
-     comparing distance to the reference, specks, and owner ratings in `benchmarks/ratings.csv`.
-   - The prompt path is well measured; the reference path is not.
-6. **Faces.** Round 1 is done (section 8): today's face pass stays the default. Next round, if faces stay the
-    priority: apply the face trace + rules v2 only to concepts with strong facial features, two samples per
-    variant, rated blind with `benchmarks/face_lab.py` (prepare / run / serve / report). Do not rely on model
-    judges.
+5. ~~Reference-image benchmark~~ first round done 2026-11-09 (section 11c). Next: rerun the ten with the cleanup
+   and face-box fixes (~$6.50), owner ratings, and a second sample per reference.
+6. **Faces.** The face kit (rules v3, Alice in Cradle construction) at 160 px is the default (section 8).
+    Next: a face-lab round of v1 against v3 with the latest kit on the 160-px runs, rated blind by the owner
+    (`benchmarks/face_lab.py` prepare / run / serve / report). Do not rely on model judges.
 7. **Directions and consistency.** Front/side/back (4- or 8-direction) sprites of the same character with an
     identical palette and proportions, reusing the animation approach: one sheet for all views, then shared
     scale and palette.

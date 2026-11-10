@@ -76,7 +76,7 @@ def stage_status(statuses):
 
 def default_settings():
     return {"projects_dir": os.path.join(os.path.expanduser("~"), "Documents", "PixelAgent"),
-            "backend": "openai", "monthly_usd": 90.0, "asset_usd": 3.0, "sprite_height": 96, "current_project": None}
+            "backend": "openai", "monthly_usd": 90.0, "asset_usd": 3.0, "sprite_height": 160, "current_project": None}
 
 
 def load_settings():
@@ -112,11 +112,21 @@ def overrides(s):
 
 
 # upper-bound estimates (USD, OpenAI mode) shown before starting; from real runs: a 96-px character ~$1.15 with the
-# fresh face pass, 64 px ~$0.70; 128 px extrapolated. Animations: plan + pose sheet ~$0.07, then ~$0.33 per drawn
+# fresh face pass, 64 px ~$0.70; 128 px extrapolated; 160 px: four real runs reusing the concept cost $0.62-1.27
+# (drawing 21-40 rounds + face pass), so ~$1.35-1.45 with concept and map, here with headroom. Animations: plan + pose sheet ~$0.07, then ~$0.33 per drawn
 # frame (two real 96-px walks: $1.46 for 6 frames, ~$1.95 for 6 frames from the exe on 2026-11-09).
-ESTIMATES = {"character": {"64": 0.70, "96": 1.15, "128": 1.70}, "animation_base": 0.08, "animation_per_frame": 0.33,
+# the reduce finish (soft look) has no drawing step: plan, concept, material map, grid pick and critique only
+REDUCE_CHARACTER = {"64": 0.30, "96": 0.30, "128": 0.30, "160": 0.30}
+ESTIMATES = {"character": {"64": 0.70, "96": 1.15, "128": 1.70, "160": 1.50}, "animation_base": 0.08, "animation_per_frame": 0.33,
              # revising the current drawing (a short session) instead of drawing it again (~$0.90)
              "revise_area": 0.20, "revise_whole": 0.35}
+
+
+def estimates():
+    """The estimates the app shows: a character costs far less when the finish is the reduction (no drawing)."""
+    from ..config import load_config
+    mode = load_config().get("finish", {}).get("mode", "artist")
+    return {**ESTIMATES, "character": REDUCE_CHARACTER} if mode == "reduce" else ESTIMATES
 
 
 def spend_check(settings, pid=None, aid=None):
@@ -795,7 +805,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"projects": projects, "current": cur, "settings": {
                     "backend": s["backend"], "monthly_usd": s["monthly_usd"], "asset_usd": s.get("asset_usd", 3.0),
                     "sprite_height": s["sprite_height"], "projects_dir": s["projects_dir"], "key_found": key_found()},
-                    "month_spent": round(spent, 2), "estimates": ESTIMATES,
+                    "month_spent": round(spent, 2), "estimates": estimates(),
                     "trash_count": len(trash(s).entries())})
             if u.path == "/api/assets":
                 proj = Project(project_path(s, q["project"]))
@@ -891,8 +901,8 @@ class Handler(BaseHTTPRequestHandler):
                     s["sprite_height"] = int(s["sprite_height"])
                 except (TypeError, ValueError):
                     raise ValueError("the monthly limit and height must be numbers")
-                if not (0 < s["monthly_usd"] <= 10000) or s["sprite_height"] not in (64, 96, 128):
-                    raise ValueError("choose a monthly limit above 0 and a height of 64, 96 or 128 px")
+                if not (0 < s["monthly_usd"] <= 10000) or s["sprite_height"] not in (64, 96, 128, 160):
+                    raise ValueError("choose a monthly limit above 0 and a height of 64, 96, 128 or 160 px")
                 if not (0.5 <= s["asset_usd"] <= 100):
                     raise ValueError("choose a limit per item between $0.50 and $100")
                 if body.get("api_key"):

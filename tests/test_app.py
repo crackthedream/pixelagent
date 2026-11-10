@@ -176,6 +176,8 @@ class AppServerTest(unittest.TestCase):
         self.ok(self.post("/api/settings", {"monthly_usd": "45", "sprite_height": 128}))
         s = self.ok(self.get("/api/overview"))["settings"]
         self.assertEqual((s["monthly_usd"], s["sprite_height"]), (45.0, 128))
+        self.ok(self.post("/api/settings", {"monthly_usd": 90, "sprite_height": 160}))   # the AIC-scale default
+        self.assertEqual(self.ok(self.get("/api/overview"))["settings"]["sprite_height"], 160)
         self.ok(self.post("/api/settings", {"monthly_usd": 90, "sprite_height": 96}))
 
     def test_animations_are_listed_by_parent_not_by_id_prefix(self):

@@ -442,7 +442,7 @@ function decisionPanel(d) {
       <div class="spec-grid">
         <div class="field"><label for="sp-name">Name</label><input class="input" id="sp-name" value="${esc(s.name)}"></div>
         <div class="field"><span class="label">Height</span><div class="segmented" id="sp-h">
-          ${[64, 96, 128].map((h) => `<button data-v="${h}" aria-pressed="${s.height_px === h}">${h} px</button>`).join("")}</div></div>
+          ${[64, 96, 128, 160].map((h) => `<button data-v="${h}" aria-pressed="${s.height_px === h}">${h} px</button>`).join("")}</div></div>
         <div class="field full"><label for="sp-sum">Description</label><textarea class="textarea" id="sp-sum">${esc(s.summary)}</textarea></div>
         <div class="field"><span class="label">View</span><div class="segmented" id="sp-view">
           ${[["front", "Front"], ["three_quarter", "Three-quarter"], ["side", "Side"], ["back", "Back"]].map(([v, l]) =>
@@ -663,7 +663,7 @@ function sheetNewCharacter() {
         <textarea class="textarea" id="nc-prompt2" style="min-height:60px" placeholder="Optional notes, for example: keep the red scarf"></textarea></div>
       <div class="row-2"><div class="field"><label for="nc-name">Name</label><input class="input" id="nc-name" placeholder="Optional"></div>
         <div class="field"><span class="label">Height</span><div class="segmented" id="nc-h">
-          ${[64, 96, 128].map((v) => `<button data-v="${v}" aria-pressed="${v === h}">${v} px</button>`).join("")}</div></div></div>
+          ${[64, 96, 128, 160].map((v) => `<button data-v="${v}" aria-pressed="${v === h}">${v} px</button>`).join("")}</div></div></div>
     </div>
     <div class="actions"><span class="estimate" id="nc-est"></span><button class="btn" data-close>Cancel</button><button class="btn primary" id="nc-go">Create character</button></div>`, (s) => {
     wireSegmented(s);
@@ -769,7 +769,7 @@ function renderSettings() {
       <div class="setting"><div class="grow">Mode<div class="muted">Test runs use stand-in models: no cost, placeholder pictures.</div></div>
         <div class="segmented" id="st-mode">${[["openai", "OpenAI"], ["dry_run", "Test run"]].map(([v, l]) => `<button data-v="${v}" aria-pressed="${s.backend === v}">${l}</button>`).join("")}</div></div>
       <div class="setting"><div class="grow">Default height<div class="muted">96 px keeps faces readable.</div></div>
-        <div class="segmented" id="st-h">${[64, 96, 128].map((v) => `<button data-v="${v}" aria-pressed="${Number(s.sprite_height) === v}">${v} px</button>`).join("")}</div></div>
+        <div class="segmented" id="st-h">${[64, 96, 128, 160].map((v) => `<button data-v="${v}" aria-pressed="${Number(s.sprite_height) === v}">${v} px</button>`).join("")}</div></div>
       <div class="setting"><div class="grow">Monthly limit<div class="muted">For all projects together. Work stops when it is reached (estimated spend).</div></div>
         <label class="affix"><span>US$</span><input class="input" id="st-cap" type="number" min="1" step="1" value="${esc(s.monthly_usd)}" aria-label="Monthly limit in US dollars"></label></div>
       <div class="setting"><div class="grow">Limit per item<div class="muted">One character or animation, including redraws. A character costs about $1.15.</div></div>

@@ -6,7 +6,7 @@ from PyInstaller.utils.hooks import collect_submodules
 
 ROOT = os.path.abspath(os.path.join(SPECPATH, ".."))
 ENGINE = os.path.abspath(os.path.expanduser(os.environ.get("PIXELLINER_ENGINE", "~/pixelliner-mcp")))
-ENGINE_MODULES = ["server", "canvas", "art", "png", "gif", "project"]
+ENGINE_MODULES = ["server", "canvas", "art", "png", "gif", "project", "face_kit"]
 for m in ENGINE_MODULES:
     assert os.path.exists(os.path.join(ENGINE, m + ".py")), f"PixelLiner engine module {m}.py not found in {ENGINE}"
 

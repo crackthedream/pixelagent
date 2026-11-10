@@ -27,6 +27,9 @@ def run(ctx):
         spec.height_px = int(inp["height"])
     elif spec.asset_type == "character":  # otherwise characters follow the project's style guide
         spec.height_px = int(style["sprite_height"])
+    if spec.asset_type == "character" and style.get("look") == "soft" and not inp.get("keep_proportions"):
+        spec.heads_tall = float(style.get("heads_tall", 4.6))   # the look sets the proportions (editable at gate A)
+        spec.outline = "soft"
     if inp.get("view"):
         spec.view = inp["view"]
     if inp.get("name"):  # a name the user typed is theirs; the director only names unnamed characters

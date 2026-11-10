@@ -9,12 +9,45 @@ user asked otherwise."""
 CONCEPT = """Full-body {asset_type} concept for a pixel-art sprite, {view} view, standing neutral pose, the whole
 figure visible, centered, on a plain flat {background} background. Clear readable silhouette, large simple
 shapes, strong value separation between materials, soft single light from the {light}, no cast shadow on the
-ground, no text. Subject: {summary}. Must keep: {must_keep}."""
+ground, no text. Subject: {summary}. Must keep: {must_keep}.{look}"""
 
-CLEAN_REFERENCE = """Redraw this character as a clean concept for pixel-art conversion: same identity, colours,
-costume and proportions; {view} view, full body, standing neutral pose, centered, plain flat light-grey
-background, large simple shapes, clear value separation between materials, soft single light from the {light},
-no cast shadow, no text, no background scenery."""
+# the "soft" look (config [style] look): the proportions and finish of hand-made anime action-game sprites. Written
+# as a description of the look, without naming any game or character, so the image model restyles rather than copies.
+LOOK_SOFT = """
+Art style (this matters as much as the design): a cute anime-style character for a 2D side-scrolling action game.
+Proportions about {heads} heads tall: a LARGE head (with the hair about a fifth of the full height) with a large,
+soft face, big expressive anime eyes set fairly low in the face, a tiny nose and a small mouth; a small, slim body
+with short slender limbs and small hands and feet. A smooth, clean digital illustration (not pixel art, no visible
+pixels). Light, soft, pastel-leaning colours, gentle low-contrast shading, soft coloured edges, no heavy black
+outlines. Costume simplified into a few large clear shapes: keep the
+defining colours, the hair shape and the two or three signature accessories; drop small ornaments, fine patterns
+and busy folds."""
+
+CLEAN_REFERENCE = """Redraw the character in this image as a clean concept for pixel-art conversion.
+Keep the identity: the same expression, hairstyle and hair colour, eye colour, costume colours and signature
+accessories{identity_extra}. Character: {summary}. Must keep: {must_keep}.
+{view} view, FULL BODY from the top of the head to the shoes, standing in a relaxed neutral pose, centered, with
+some empty space around the figure. If the image shows only part of the body or a seated pose, complete the full
+standing figure (legs, shoes) consistently in the same style and costume. Plain flat light-grey background, no
+scenery, no furniture, no props that are not part of the character, no text. Large simple shapes, clear value
+separation between materials, soft single light from the {light}, no cast shadow.{look}"""
+
+# the soft look's reference redraw: proportions come FIRST and with numbers -- an image edit anchors strongly on the
+# reference, and a style note at the end left realistic proportions untouched (ref03, 2026-11-10)
+RESTYLE_REFERENCE = """Restyle the character in this image into a full-body concept for a cute 2D side-scrolling
+action game.
+PROPORTIONS FIRST -- do NOT keep the reference's body proportions: the figure is about {heads} heads tall, so the
+head (with hair) is about {head_pct}% of the full height. A large head and a large, soft face with big expressive
+anime eyes set fairly low, a tiny nose and a small mouth. A small, slim body: short torso, short slender legs (about
+40% of the height), small hands and feet.
+Keep who the character is: the expression, hairstyle and hair colour, eye colour, costume colours and the signature
+accessories. Character: {summary}. Must keep: {must_keep}.
+Finish: a smooth, clean digital anime illustration (not pixel art, no visible pixels); light, pastel-leaning colours,
+gentle low-contrast shading, soft coloured edges, no heavy black outlines; the costume simplified into a few large
+clear shapes, small ornaments, fine patterns and busy folds dropped.
+{view} view, FULL BODY from the top of the head to the shoes, standing in a relaxed neutral pose, centered, with some
+empty space around the figure. Plain flat light-grey background, no scenery, no props that are not part of the
+character, no text, soft single light from the {light}, no cast shadow."""
 
 REFINE_CONCEPT = """Refine this concept for pixel-art conversion without changing the design: keep identity, pose,
 colours and proportions; simplify noisy detail into large clear shapes, make the silhouette crisp, keep the

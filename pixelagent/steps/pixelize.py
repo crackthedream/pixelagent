@@ -13,7 +13,8 @@ def run(ctx):
     combos = list(itertools.product(offs, offs))[: int(ctx.cfg["budget"]["grid_candidates"])]
     # The final sprite, outline included, must fit spec.height_px with canvas_margin free pixels around it:
     # the outline adds 1 px on every side, and a shifted grid can need one extra sample row.
-    ol = 0 if spec.outline == "none" else 1
+    # no outline ring in the reduce finish (the concept's own edges stay), so the figure uses the full height
+    ol = 0 if spec.outline == "none" or ctx.cfg.get("finish", {}).get("mode") == "reduce" else 1
     margin = int(ctx.style["canvas_margin"]) + ol
     body_h = max(4, spec.height_px - 2 * ol - 1)
     cands, scores, geoms = [], [], []

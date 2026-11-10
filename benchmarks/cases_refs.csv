@@ -1,0 +1,11 @@
+id,input,source,height,notes
+ref01,reference,refs/owner/ref01.png,96,full body, waving, studio
+ref02,reference,refs/owner/ref02.png,96,upper body, microphone, studio
+ref03,reference,refs/owner/ref03.png,96,thigh-up, school uniform, street
+ref04,reference,refs/owner/ref04.png,96,upper body, seated, cafe
+ref05,reference,refs/owner/ref05.png,96,full body, microphone, stage
+ref06,reference,refs/owner/ref06.png,96,waist-up, male, stage
+ref07,reference,refs/owner/ref07.png,96,thigh-up, school uniform, classroom
+ref08,reference,refs/owner/ref08.png,96,full body, kimono, garden
+ref09,reference,refs/owner/ref09.png,96,waist-up, plush toy, room
+ref10,reference,refs/owner/ref10.png,96,full body, seated on a bench

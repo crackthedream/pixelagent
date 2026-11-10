@@ -7,10 +7,9 @@ Model judges proved unreliable for faces this small (position bias in pairwise t
   python benchmarks/face_lab.py serve --round r1         rating page on http://127.0.0.1:8791 (blind, shuffled)
   python benchmarks/face_lab.py report --round r1        ratings revealed per variant
 
-Variants (all from the same start):
-  A  today's face pass: normal trace, face rules v1
-  B  face trace (pixelagent.face.face_trace) as the reference inside the face, rules v1
-  C  face trace + face rules v2 (feature sizes from the face trace, colour rules)"""
+Variants (all from the same start, the sprite with its face reset to the trace):
+  A  face rules v1: the model draws the face pixels
+  K  face rules v3: the model builds the face with the engine's face kit (the default)"""
 import argparse
 import glob
 import http.server
@@ -33,13 +32,13 @@ from PIL import Image  # noqa: E402
 from pixelagent import imaging  # noqa: E402
 from pixelagent.artist import face_region, palette_args, run_artist  # noqa: E402
 from pixelagent.config import load_engine  # noqa: E402
-from pixelagent.face import face_trace, reset_face  # noqa: E402
+from pixelagent.face import reset_face  # noqa: E402
 from pixelagent.mcp_client import MCPClient  # noqa: E402
 from pixelagent.store import Project  # noqa: E402
 
-VARIANTS = {"A": ("trace", "v1"), "B": ("face_trace", "v1"), "C": ("face_trace", "v2")}
-DEFAULT_SOURCES = [os.path.join(REPO, "bench_runs_96", "assets", "*-20261108-155243"),
-                   os.path.join(os.path.expanduser("~"), "Documents", "PixelAgent", "Starter cast", "assets", "lantern-keeper")]
+VARIANTS = {"A": ("trace", "v1"), "K": ("trace", "v3"),
+            "J": ("trace", "v3")}  # J: an earlier kit's K results copied in for comparison (round 5); not run again
+DEFAULT_SOURCES = [os.path.join(REPO, "bench_runs_160", "assets", "*")]
 
 
 def round_dir(name):
@@ -55,7 +54,13 @@ def characters(sources):
             st = json.load(open(p, encoding="utf-8"))
             if st["inputs"].get("kind") == "animation" or "artist" not in st["steps"]:
                 continue
-            yield os.path.basename(d).split("-2026")[0], d, {k: v["outputs"] for k, v in st["steps"].items()}
+            o = {k: v["outputs"] for k, v in st["steps"].items()}
+            if st["steps"]["artist"].get("status") != "done":
+                # not drawn yet (e.g. retraced at another height): the face pass starts from the traced sprite
+                if st["steps"].get("polish", {}).get("status") != "done":
+                    continue
+                o["artist"] = {"trace": o["polish"]["preview"], "preview": o["polish"]["preview"]}
+            yield os.path.basename(d).split("-2026")[0], d, o
 
 
 def prepare(args):
@@ -75,16 +80,17 @@ def prepare(args):
         concept = Image.open(os.path.join(d, o["concept"]["concept"]))
         cdir = os.path.join(out, name)
         os.makedirs(cdir, exist_ok=True)
-        ftrace, changed = face_trace(trace, concept, geom, lm["labels"], lm["width"], box)
         reset_face(sprite, trace, lm["labels"], lm["width"], box).save(os.path.join(cdir, "start.png"))
         trace.save(os.path.join(cdir, "trace.png"))
-        ftrace.save(os.path.join(cdir, "face_trace.png"))
         shutil.copyfile(os.path.join(d, o["concept"]["concept"]), os.path.join(cdir, "concept.png"))
-        if "concept_face" in o["artist"]:
-            shutil.copyfile(os.path.join(d, o["artist"]["concept_face"]), os.path.join(cdir, "concept_face.png"))
+        # the concept's face, cropped with the CURRENT face box (an earlier run's crop may be of the wrong place)
+        from pixelagent.regions import concept_crop
+        crop = concept_crop(Image.open(os.path.join(d, o["concept"]["concept"])).convert("RGBA"), geom, box, pad=2)
+        if crop is not None:
+            crop.save(os.path.join(cdir, "concept_face.png"))
         tpx = np.asarray(trace).reshape(-1, 4)
         palette = sorted({"#%02x%02x%02x" % tuple(int(v) for v in p[:3]) for p in tpx[tpx[:, 3] > 0]})
-        for ref in ("trace", "face_trace"):
+        for ref in ("trace",):
             mcp = MCPClient(os.path.join(engine, "server.py"), env={"PIXELLINER_MCP_OUT": cdir})
             try:
                 W, H = trace.size
@@ -102,9 +108,8 @@ def prepare(args):
                 mcp.close()
         st = json.load(open(os.path.join(d, "state.json"), encoding="utf-8"))
         spec = json.load(open(os.path.join(d, o["intake"]["spec"]), encoding="utf-8"))
-        cases.append({"name": name, "box": list(box), "height": spec.get("height_px", 96), "face_trace_cells": changed,
-                      "source": d})
-        print(f"{name}: face {box}, face trace changed {changed} cells")
+        cases.append({"name": name, "box": list(box), "height": spec.get("height_px", 96), "source": d})
+        print(f"{name}: face {box}")
     json.dump({"cases": cases}, open(os.path.join(out, "cases.json"), "w", encoding="utf-8"), indent=1)
 
 
@@ -163,8 +168,8 @@ textarea{width:100%;margin-top:12px;border-radius:8px;border:1px solid rgba(120,
 #msg{color:var(--text2)}
 </style></head><body><main>
 <h1>Which face is best?</h1>
-<p class="lead">Each character has three versions of the same sprite; only the face differs. They are shuffled and unlabelled.
-Rank them 1st, 2nd, 3rd against the concept on the left: does the face read clearly at game size and keep the expression?
+<p class="lead">Each character has several versions of the same sprite; only the face differs. They are shuffled and
+unlabelled. Rank them against the concept on the left: does the face read clearly at game size and keep the expression?
 A note helps when something specific is wrong.</p>
 <div id="cases"></div>
 <div class="bar"><span id="msg"></span><button class="save" id="save">Save ratings</button></div>
@@ -284,7 +289,7 @@ def main():
     ap.add_argument("cmd", choices=["prepare", "run", "serve", "report"])
     ap.add_argument("--round", default="r1")
     ap.add_argument("--sources", nargs="*", default=DEFAULT_SOURCES)
-    ap.add_argument("--variants", default="ABC")
+    ap.add_argument("--variants", default="AK")
     ap.add_argument("--jobs", type=int, default=3)
     ap.add_argument("--max-usd", type=float, default=0.30)
     ap.add_argument("--face-turns", type=int, default=12)

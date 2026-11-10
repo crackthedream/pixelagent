@@ -204,6 +204,7 @@ class OpenAIBackendTests(unittest.TestCase):
         ref = os.path.join(self.tmp, "ref.png")
         synth.draw_character(seed=2, size=384, background=(60, 70, 60))[0].save(ref)
         self.proj.config["concept"] = {"clean_reference": True, "refine_after_pick": True}
+        self.proj.config["style"]["look"] = "classic"         # the classic look keeps the reference as a candidate
         self.assertEqual(self._run("ref1", {"references": [ref], "height": 40}), "complete")
         edits = [kw for name, kw in self.client.log if name == "edit"]
         self.assertEqual(len(edits), 3)                      # redraw candidate + refine after pick + material map
@@ -213,6 +214,58 @@ class OpenAIBackendTests(unittest.TestCase):
         self.assertTrue(info.get("refined"))
         intake = [kw for name, kw in self.client.log if name == "parse"][0]
         self.assertTrue(any(c["type"] == "input_image" for c in intake["input"][0]["content"]))
+
+    def test_references_with_scenery_are_redrawn_and_wait_for_approval(self):
+        # a reference with scenery (typical illustrations) used to be converted whole, background and all
+        self.proj.config["style"]["look"] = "classic"         # the soft look restyles every reference (own test)
+        import numpy as np
+        rng = np.random.default_rng(1)
+        busy = Image.fromarray(rng.integers(0, 255, (512, 384, 3), dtype=np.uint8), "RGB")
+        fig = synth.draw_character(seed=2, size=384, background=None)[0]
+        busy.paste(fig.convert("RGB"), (0, 64), fig)
+        ref = os.path.join(self.tmp, "scene.png")
+        busy.save(ref)
+        self.proj.new_asset("scene", {"references": [ref], "height": 40})
+        pipe = Pipeline(self.proj, "scene", client=self.client)
+        self.assertEqual(pipe.run(log=quiet), "awaiting_gate")                        # the plan (gate A)
+        pipe.decide(True)
+        status = Pipeline(self.proj, "scene", client=self.client).run(log=quiet)       # no auto-approve
+        a = self.proj.asset("scene")
+        info = a.state.steps["concept"].info
+        self.assertFalse(info["reference_check"]["usable_as_is"])
+        self.assertEqual(info["sources"], ["reference redrawn"])                       # the scene is not offered
+        edits = [kw for name, kw in self.client.log if name == "edit"]
+        self.assertEqual(len(edits), 1)
+        self.assertIn("FULL BODY", edits[0]["prompt"])
+        self.assertIn("test hero", edits[0]["prompt"])                                 # the plan's summary guides it
+        self.assertEqual((status, a.state.steps["concept"].status), ("awaiting_gate", "awaiting_gate"))
+        # a clean reference on a flat background is still used as it is, with no image-model call
+        flat = os.path.join(self.tmp, "flat.png")
+        synth.draw_character(seed=2, size=384, background=(200, 200, 204))[0].save(flat)
+        n = len([1 for name, _ in self.client.log if name == "edit"])
+        self._run("flat", {"references": [flat], "height": 40})
+        self.assertEqual(self.proj.asset("flat").state.steps["concept"].info["sources"], ["reference"])
+        self.assertEqual(len([1 for name, _ in self.client.log if name == "edit"]) - n, 1)   # only the material map
+
+    def test_soft_look_restyles_references_into_game_proportions(self):
+        # the soft look (default): even a clean reference is redrawn in the game's proportions and finish; the
+        # restyled concept comes first (an automatic pick takes it), the reference itself stays a candidate
+        self.assertEqual(self.proj.config["style"]["look"], "soft")
+        flat = os.path.join(self.tmp, "flat.png")
+        synth.draw_character(seed=2, size=384, background=(200, 200, 204))[0].save(flat)
+        self.assertEqual(self._run("soft", {"references": [flat], "height": 40}), "complete")
+        a = self.proj.asset("soft")
+        self.assertEqual(a.state.steps["concept"].info["sources"], ["reference redrawn", "reference"])
+        prompt = [kw for name, kw in self.client.log if name == "edit"][0]["prompt"]
+        self.assertTrue(prompt.startswith("Restyle"))
+        self.assertIn("do NOT keep the reference's body proportions", prompt)   # proportions lead, with numbers
+        self.assertIn("4.6 heads tall", prompt)
+        self.assertIn("22% of the full height", prompt)
+        self.assertIn("not pixel art", prompt)
+        self.assertIn("no heavy black outlines", prompt)
+        self.assertNotIn("same proportions", prompt)
+        spec = json.loads(open(a.output("intake", "spec"), encoding="utf-8").read())
+        self.assertEqual((spec["heads_tall"], spec["outline"]), (4.6, "soft"))
 
     def _repair_case(self, second_overall):
         bad = Critique(overall=6.0, verdict="repair", issues=[

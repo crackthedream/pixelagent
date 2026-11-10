@@ -50,7 +50,7 @@ python -m pixelagent --project D:/pixel_projects/mygame export hero --open     #
 | # | Step | Kind | Main output |
 |---|---|---|---|
 | 1 | intake | model (director) → **gate A** | `spec.json` (CharacterSpec; edit before approving) |
-| 2 | concept | reference cleanup / image model → **gate B** | `concept.png` (background removed, cropped); with a reference image there is no choice to make |
+| 2 | concept | reference cleanup / image model → **gate B** | `concept.png` (background removed, cropped); a reference with scenery or a partial figure is redrawn as a clean full-body concept and waits for approval |
 | 3 | matmap | image model + checks | flat key-colour material map of the concept (silhouette IoU ≥ 0.85) |
 | 4 | pixelize | code + model pick | grid-alignment candidates → `pixel_base.png` |
 | 5 | materials | code + model labels | colour clusters → materials → colour families → hue-shifted ramps within the colour budget |
@@ -104,9 +104,14 @@ engine over stdio), not converted:
 
 Measured on the 5 benchmark characters: at 64 px the hybrid costs $0.35-0.44 and 2-3 min per sprite for the drawing
 (upper bound; ~90% of input is cached context), fewest specks of all variants; the face pass ($0.05-0.08) gave modest
-gains because a 64-px face is only ~8x10 px. **Default is therefore 96 px** ([style] sprite_height): faces are
-13-17 px wide and read clearly (eyes, mouths, goggles), the drawing costs $0.80-0.95 and 4-5 min (upper bound), a
-full character from a prompt ~$1.10. Use `--height` (CLI `new`, benchmark runners) for other sizes, or game-style
+gains because a 64-px face is only ~8x10 px. 96 px gave faces 9-13 px wide on anime references, still too few
+pixels for natural expressions. **Default is now 160 px** ([style] sprite_height), the scale of hand-made anime
+sprites (Alice in Cradle: ~150 px tall, faces 16-18 px): faces are ~16 px wide and the face kit's eyes and soft
+mouths read naturally. A real 160-px run cost about the same as at 96 px ($0.62 for drawing + face pass + critique
+with the concept reused, 4 min). **The default look is "soft"** (`[style] look`): characters are restyled toward
+hand-made anime action-game sprites (Alice in Cradle as the reference). That means ~4.6 heads tall with a large head
+and face, light low-contrast colours, soft coloured outlines and a simplified costume; `look = "classic"` keeps the
+concept's proportions and a dark outline. Use `--height` (CLI `new`, benchmark runners) for other sizes, or game-style
 head proportions in the concept prompt if a smaller sprite is required. Model judges are unreliable for faces this small (pairwise judging with swapped
 order showed position bias), so faces should be judged by eye. Tools: `benchmarks/artist_run.py`
 (`--hybrid`, `--agent-tag`), `benchmarks/face_pass.py`, `pixelagent/judge.py`.

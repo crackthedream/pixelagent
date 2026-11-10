@@ -20,7 +20,7 @@ class CharacterSpec(BaseModel):
     height_px: int = Field(96, ge=8, le=512, description="Sprite height in pixels")
     heads_tall: Optional[float] = Field(None, description="Proportions in head-heights, if known")
     light: str = "top-left"
-    outline: Literal["selout", "dark", "none"] = "selout"
+    outline: Literal["soft", "selout", "dark", "none"] = "soft"
     max_colors: int = 32
     materials: list[Material] = Field(default_factory=list)
     detail_priorities: list[str] = Field(default_factory=lambda: ["face", "hands"])

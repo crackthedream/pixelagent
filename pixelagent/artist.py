@@ -55,11 +55,19 @@ Your job: draw the sprite cleanly on your own layers (start on 'Layer 1', add la
 for shape and colour placement, but as deliberate pixel art:
 - merge noisy, speckled areas into clean clusters and readable light/shadow shapes (light from the {light});
 - redraw focal features (face/eyes, hands, held items, emblems, thin props) crisply, checking the concept;
-- keep a clean, consistent outline; no stray single pixels except intentional highlights.
+- keep a clean, consistent outline; no stray single pixels except intentional highlights.{look_rules}
 `view` mode 'grid' with layer 'reference' and a small region (x, y, width, height) shows the trace's exact pixels as
 palette keys: use it to copy regions that are already good, and improve the rest. pixel_map rows are the fastest way
 to lay down areas. Check progress with `view` (image) or `compare_reference` (distance to the trace) after each
 part, not after every op. Budget: about {turns} tool rounds; images are expensive. When done, call `finish`."""
+
+
+# drawing rules per project look (config [style] look); "soft" = hand-made anime action-game sprites
+LOOK_RULES = {"soft": """
+This game's look is SOFT (like hand-made anime action-game sprites): light colours and gentle shading with few hard
+contrasts; outlines in a darker shade of the colour they enclose, never a black line around the whole figure (dark
+only where the material itself is dark: dark hair, shoes); the head and face stay large; simplify small costume
+details into clean shapes rather than adding detail."""}
 
 
 FACE_INSTRUCTIONS = """You are a senior pixel artist doing the FACE PASS on a {height}-px-tall game sprite, using the
@@ -84,35 +92,53 @@ redraw the face region with a `draw` pixel_map (use '=' to keep pixels). Check w
 (scale 12-16). You have about {turns} rounds. Call `finish` when the face reads clearly and matches the concept."""
 
 
-FACE_INSTRUCTIONS_V2 = """You are a senior pixel artist doing the FACE PASS on a {height}-px-tall game sprite, using the
-pixelliner tools. Only the face matters now: it is the first thing a player reads, so it must carry the
-character's expression from the concept.
+FACE_INSTRUCTIONS_V3 = """You are a senior pixel artist doing the FACE PASS on a {height}-px-tall game sprite, using the
+pixelliner tools. Only the face matters now: it is the first thing a player reads and must carry the character's
+expression from the concept.
 
 The face is in region x={fx}, y={fy}, w={fw}, h={fh} of the {w}x{h} canvas (an estimate; adjust if the face is
 clearly elsewhere). You get: the current sprite zoomed on that region with a pixel grid, the same region of the
-reference layer, and a high-resolution close-up of the concept's face.
+trace, and a high-resolution close-up of the concept's face.
 
-Inside the face the reference layer is a FACE TRACE: the concept's face reduced to exactly this size while keeping
-its dark features, so it shows where the eyes, brows and mouth sit and how many pixels each covers at this size.
-Read it with `view` mode 'grid' and layer 'reference'. Follow its feature positions and sizes and draw them
-cleanly (the face trace is a guide and can be ragged); never make a feature smaller than it shows.
+At this size an anime-style face is DESIGNED, not shrunk. Hand-made sprites in this style (e.g. Alice in Cradle's
+Noel) build it the same way every time:
+- an open eye is TALLER than wide: a dark lash across the top that continues down the OUTER side as a wing, a soft
+  white inside that corner, the iris body hanging under the lash with the pupil low and toward the nose, lighter
+  at the bottom. No lower outline, no box;
+- the eyes are big: the two eyes and the gap between them span almost the whole face width, the gap a little under
+  one eye width. They sit just under the fringe, low in the face. No nose; brows are usually hidden by the fringe;
+- on a three-quarter face the far eye (the side the face turns toward) is narrower and the face's centre line
+  moves toward it;
+- the skin is FLAT: one skin colour, no blotches or specks around the eyes;
+- the mouth is small and SOFT, about halfway between the eyes and the chin: none or a 1-2 px line a little darker
+  than the skin for calm faces, a round salmon blob for an open mouth -- never a dark outline or an emoticon "v";
+- the expression lives in the lash: lowered (half: calm, smug, sleepy), slanting up to the inner end (sad,
+  worried), slanting down to the inner end (angry), ^ arcs (happy), a soft line (closed), more white (surprised).
+Build the face with the face-kit ops of `draw` (skin, eyes, mouth, brows, blush); they draw exactly these parts. Do
+not place eye or mouth pixels by hand. The first message gives the face MEASURED on this sprite with the kit's
+sizes and positions in the game's proportions: start from those values.
 
-Pixel-art face rules:
-- Eyes: as large as the face trace shows (at this size usually 2 px wide and 2-3 px tall). Build each from a dark
-  upper lash line in the darkest NON-outline dark of the palette (dark brown, the hair's dark or a dark iris), the
-  concept's iris colour below it, and one light highlight pixel when the eye is 2x2 or larger. Never draw eyes in
-  the outline colour, and never as one isolated dark pixel unless the concept's eyes are closed lines.
-- Both eyes clearly separate, the same size and height (unless the view is turned), spaced as in the face trace.
-- Brows: 1-px marks only where the concept shows them clearly, in the hair's dark shade.
-- Mouth: the face trace's size and shape (a smile 2-4 px with the ends up; an open mouth 2x2 with a darker
-  inside), in a warm mid-dark (dark skin shade or dark red), not the outline colour. A calm face: 1-2 px or none.
-- Nose: omitted, or 1 px of skin shadow. Blush: 1-2 px each side if the concept has it.
-- Skin uses 2-3 shades; no stray dark pixels on the skin; keep the hair/fringe edge crisp around the face.
-Redraw the face region with a `draw` pixel_map (use '=' to keep pixels) on your layer. Check with `view` zoomed on
-the region (scale 12-16) and compare with the concept close-up. You have about {turns} rounds. Call `finish` when
-the face reads clearly at 1x and matches the concept's expression."""
+1. Read the concept close-up: the eye colour; front or three-quarter view (which way the face turns); the
+   expression (open, half, happy, closed, wide, sad, angry, or a wink); the mouth (none, line, smile, open smile, o,
+   frown...); whether brows show below the fringe; blush.
+2. Clear the old eyes and mouth: paint them over with the face's skin colour (`draw` rect or pixel_map), keeping hair,
+   fringe strands and outline intact. Then flatten the skin: {{"op": "skin", "x": .., "y": .., "w": .., "h": ..}}
+   over the face (the measured box).
+3. eyes: {{"op": "eyes", "cx": .., "y": .., "size": .., "gap": .., "style": .., "turn": "front"|"left"|"right",
+   "iris": <the concept's eye colour>, "lash": <a very dark colour: the darkest hair or brown shade, not grey>}}
+   with the measured cx, y, size and gap. cx is the centre of the face, so the eyes sit symmetrically between its
+   edges (for a three-quarter face, a pixel toward the side it turns to).
+4. mouth: {{"op": "mouth", "cx": <same cx>, "y": <the measured mouth row>, "shape": ...}} -- leave the colours to
+   the kit (they are mixed from the skin). none or line for calm, smile for a gentle smile, open_smile for a
+   cheerful open mouth, o for surprise, frown for sad.
+5. brows: usually none -- in this style the fringe hides them, and hard dark brows make a small face look stern.
+   Only if the concept shows clear brows below the fringe: {{"op": "brows", ...}} (the kit draws them faint).
+   blush only if the concept has it: {{"op": "blush", "cx": .., "y": <the row under the eyes>, "gap": ..}}.
+6. Check with `view` zoomed on the region (scale 12-16) and at scale 1-2. To adjust, clear the eyes or mouth again and
+   repeat the op with new values (cx, y, size, gap, style). You have about {turns} rounds. Call `finish` when the
+   face is symmetric, sits correctly in the head, and reads at 1x with the concept's expression."""
 
-FACE_RULES = {"v1": FACE_INSTRUCTIONS, "v2": FACE_INSTRUCTIONS_V2}
+FACE_RULES = {"v1": FACE_INSTRUCTIONS, "v3": FACE_INSTRUCTIONS_V3}  # v3: the face kit (default)
 
 REVISE_INSTRUCTIONS = """You are a senior pixel artist revising a finished {height}-px-tall game sprite with the pixelliner
 tools. The user reviewed it and asked for this change:
@@ -143,10 +169,16 @@ def face_region(labels, w, h, opaque=None):
     if len(head) < 6:
         return None
     # a face is a GROUP of nearby marks (skin, or separate eyes + mouth + blush on a non-skin body): join
-    # feature pixels within `gap` px of each other and take the biggest group (a raised hand stays separate)
+    # feature pixels within `gap` px of each other
     gap = 3
     pset = set(head)
-    seen, best = set(), []
+    label_at = {(k % w, k // w): m for k, m in enumerate(labels) if m in face_mats}
+
+    def is_feature(p):  # eyes, mouth, blush...: what marks a face, unlike skin (a hand is skin too)
+        n = label_at[p].lower().replace("-", "_").replace(" ", "_")
+        return not n.startswith(("skin", "face"))
+
+    seen, best, best_key = set(), [], (-1, -1)
     for p in head:
         if p in seen:
             continue
@@ -161,18 +193,64 @@ def face_region(labels, w, h, opaque=None):
                     if r in pset and r not in seen:
                         seen.add(r)
                         stack.append(r)
-        if len(comp) > len(best):
-            best = comp
+        # the group holding the eyes/mouth is the face, even when a raised hand is bigger; else the biggest
+        key = (sum(1 for q in comp if is_feature(q)), len(comp))
+        if key > best_key:
+            best, best_key = comp, key
     xs, ys = [p[0] for p in best], [p[1] for p in best]
-    x0, y0 = max(0, min(xs) - 1), max(0, min(ys) - 1)
-    x1, y1 = min(w, max(xs) + 2), min(h, max(ys) + 2)
+    gx0, gy0, gx1, gy1 = min(xs), min(ys), max(xs), max(ys)
+    feats = [q for q in best if is_feature(q)]
+    if len(feats) >= 2:
+        # size the box around the features, not the whole skin group: a hand near the head joins the group
+        fx0, fx1 = min(q[0] for q in feats), max(q[0] for q in feats)
+        fy0, fy1 = min(q[1] for q in feats), max(q[1] for q in feats)
+        pad = max(3, round((fx1 - fx0 + 1) * 0.5))
+        gx0, gx1 = max(gx0, fx0 - pad), min(gx1, fx1 + pad)
+        gy0, gy1 = max(gy0, fy0 - 4), min(gy1, fy1 + 5)
+    else:
+        # no eye/mouth labels: hands near the face can join the skin group, so keep a face-sized box from the
+        # top of the group (a face is about 18% of the figure's height)
+        cap = max(8, round((bottom - top + 1) * 0.18))
+        if gy1 - gy0 + 1 > cap:
+            gy1 = gy0 + cap - 1
+            row_xs = [q[0] for q in best if gy0 <= q[1] <= gy1]
+            gx0, gx1 = min(row_xs), max(row_xs)
+        if gx1 - gx0 + 1 > cap:
+            mid = (gx0 + gx1) // 2
+            gx0, gx1 = mid - cap // 2, mid - cap // 2 + cap - 1
+    x0, y0 = max(0, gx0 - 1), max(0, gy0 - 1)
+    x1, y1 = min(w, gx1 + 2), min(h, gy1 + 2)
     return (x0, y0, max(4, x1 - x0), max(4, y1 - y0))
+
+
+def _measured_face(mcp, out, face):
+    """The face measured on the current sprite (pixelagent.face.face_layout) as text for the face pass: where the skin,
+    fringe line and chin are, and the face kit's sizes and positions in the game's proportions."""
+    from PIL import Image
+    from .face import face_layout
+    path = os.path.join(out, "face_measure.png")
+    try:
+        _, _, err = mcp.call("export", {"path": path})
+        if err:
+            return ""
+        with Image.open(path) as im:
+            L = face_layout(im, face)
+    except Exception:  # noqa: BLE001 - the measurement is advice; the pass works without it
+        return ""
+    if not L:
+        return ""
+    return (f"\nMeasured on this sprite: face skin x={L['left']}..{L['right']} ({L['skin_w']} px wide), fringe line "
+            f"y={L['fringe_y']}, chin y={L['chin_y']}, skin {L['skin']}. Placement in the game's proportions: "
+            f"skin {{x: {L['left']}, y: {L['fringe_y']}, w: {L['skin_w']}, h: {L['chin_y'] - L['fringe_y'] + 1}}}; "
+            f"eyes cx={L['cx']}, y={L['eye_y']}, size {L['size']}, gap {L['gap']}; mouth cx={L['cx']}, y={L['mouth_y']}. "
+            "Use these unless the sprite clearly shows otherwise (for a three-quarter face, shift cx a pixel toward "
+            "the side the face turns to and set turn).")
 
 
 def run_artist(project, asset_id, reference, height=64, client=None, model=None, max_usd=3.0, max_turns=60,
                effort="medium", log=print, trace=None, palette=None, out_dir=None, start_project=None,
                phases=("draw", "face"), face=None, concept_face=None, face_turns=12, notes=None,
-               live=None, face_rules="v1", revise=None, revise_turns=14):
+               live=None, face_rules="v1", revise=None, revise_turns=14, look=None):
     """reference: concept image the model sees. trace (hybrid mode): an image already on the sprite grid (e.g. the
     pipeline's cleaned sprite) used 1:1 as the tracing layer instead of a downscaled reference; palette: colours
     ({name: hex} or [hex]) loaded into the canvas palette with single-character keys.
@@ -245,7 +323,7 @@ def run_artist(project, asset_id, reference, height=64, client=None, model=None,
         if "draw" in phases:
             if trace or start_project:
                 instructions = HYBRID_INSTRUCTIONS.format(height=height, name=asset_id, w=W, h=H, turns=max_turns,
-                                                          light=light)
+                                                          light=light, look_rules=LOOK_RULES.get(look, ""))
             else:
                 instructions = INSTRUCTIONS.format(height=height, name=asset_id, w=W, h=H, rx=margin, rx2=margin + rw - 1,
                                                    ry=margin, ry2=margin + height - 1, light=light,
@@ -266,9 +344,12 @@ def run_artist(project, asset_id, reference, height=64, client=None, model=None,
             _, cur_imgs, _ = mcp.call("view", {"mode": "image", "x": vx, "y": vy, "width": vw, "height": vh, "scale": 16})
             _, trace_imgs, _ = mcp.call("view", {"mode": "image", "x": vx, "y": vy, "width": vw, "height": vh, "scale": 16,
                                                  "layer": "reference"})
+            measured = ""
+            if face_rules == "v3":
+                measured = _measured_face(mcp, out, face)
             content = [{"type": "input_text", "text": f"FACE PASS. Face region x={fx}, y={fy}, w={fw}, h={fh}. Images: "
                                                       "1) your sprite zoomed on the face area (with grid), 2) the trace "
-                                                      "there, 3) the concept's face close-up. Canvas " + pal_txt}]
+                                                      "there, 3) the concept's face close-up. Canvas " + pal_txt + measured}]
             content += [img(p) for p in sess.save_imgs(cur_imgs + trace_imgs, "faceview")]
             if concept_face and os.path.exists(concept_face):
                 content.append(img(concept_face))

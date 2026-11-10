@@ -64,6 +64,10 @@ def _row(proj, case, aid, status, seconds):
            "concept_distance": lint.get("concept_distance"),
            "matmap_usable": st["matmap"].info.get("usable"), "matmap_iou": st["matmap"].info.get("iou"),
            "detail_regions": len(st["detail"].info.get("changed_regions", [])),
+           "concept_sources": "+".join(st["concept"].info.get("sources", [])),
+           "reference_cover": (st["concept"].info.get("reference_check") or {}).get("figure_cover"),
+           "artist_usd": st["artist"].info.get("usd") if "artist" in st else None,
+           "artist_turns": st["artist"].info.get("turns") if "artist" in st else None,
            "repair_rounds": st["critique"].info.get("rounds")}
     return row, imaging.load_rgba(a.output("export", "png"))
 
@@ -94,6 +98,7 @@ def main():
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--backend", choices=["dry_run", "openai"])
     ap.add_argument("--only")
+    ap.add_argument("--cases", default="cases.csv", help="case list in benchmarks/ (e.g. cases_refs.csv)")
     ap.add_argument("--jobs", type=int, default=1, help="cases run in parallel (API calls are I/O bound)")
     ap.add_argument("--rerun-from", help="step to rerun from, using copies of assets from --source")
     ap.add_argument("--source", help="project folder holding the assets to copy for --rerun-from")
@@ -106,7 +111,7 @@ def main():
     print("backend:", proj.config["backend"]["mode"], flush=True)
     stamp = time.strftime("%Y%m%d-%H%M%S")
     only = set(args.only.split(",")) if args.only else None
-    with open(os.path.join(HERE, "cases.csv"), encoding="utf-8") as f:
+    with open(os.path.join(HERE, args.cases), encoding="utf-8") as f:
         cases = [c for c in csv.DictReader(f) if not only or c["id"] in only]
     if args.rerun_from:
         job = lambda c: rerun_case(proj, c, args.source, args.rerun_from, args.height)  # noqa: E731
