@@ -80,6 +80,7 @@ class AnimationTests(unittest.TestCase):
         self.assertIn("arms closer to the body", prompt)
 
     def test_reject_final_redraws_with_note(self):
+        self.proj.config["finish"]["mode"] = "artist"   # the model-drawn animation path
         pipe = self._anim("hero-jump", "jump", 3)
         pipe.run(auto_approve=False, log=quiet)
         pipe.decide(True)                                    # pose sheet
@@ -94,6 +95,46 @@ class AnimationTests(unittest.TestCase):
         self.assertEqual(a.state.steps["anim_draw"].version, 2)
         self.assertEqual(a.state.steps["anim_poses"].version, 1)    # the approved pose sheet is kept
 
+    def test_reduce_frames_are_the_pose_sheet_reductions(self):
+        # the reduce finish (default): no drawing; each frame is its pose-sheet figure reduced onto the character's
+        # grid and palette, with no outline ring
+        self.assertEqual(self.proj.config["finish"]["mode"], "reduce")
+        pipe = self._anim("hero-wave", "wave", 4)
+        self.assertEqual(pipe.run(auto_approve=True, log=quiet), "complete")
+        a = self.proj.asset("hero-wave")
+        info = a.state.steps["anim_draw"].info
+        self.assertIn("reduce", info["reason"])
+        prompt = rd(os.path.join(a.dir, a.state.steps["anim_poses"].info["dir"], "pose_prompt.txt"))
+        self.assertIn("NOT pixel art", prompt)
+        oc = self.proj.config["style"]["outline_color"]
+        oc = tuple(int(oc[i:i + 2], 16) for i in (1, 3, 5))
+        for i in range(4):
+            frame = imaging.to_bytes(imaging.load_rgba(a.output("anim_draw", f"frame{i}")))
+            trace = imaging.to_bytes(imaging.load_rgba(a.output("anim_traces", f"trace{i}")))
+            self.assertEqual(frame, trace, i)
+            self.assertNotIn(oc, {tuple(frame[k:k + 3]) for k in range(0, len(frame), 4) if frame[k + 3]})
+
+    def test_reduce_review_note_goes_to_the_pose_sheet(self):
+        pipe = self._anim("hero-hop", "hop", 3)
+        self.assertEqual(pipe.run(log=quiet), "awaiting_gate")                    # gate P
+        pipe.decide(True)
+        self.assertEqual(Pipeline(self.proj, "hero-hop").run(log=quiet), "awaiting_gate")
+        pipe = Pipeline(self.proj, "hero-hop")
+        self.assertEqual(pipe.pending_gate().gate, "R")
+        pipe.decide(False, note="smaller jump")
+        # the frames come from the sheet, so the note redoes the sheet, which waits for approval again
+        self.assertEqual(Pipeline(self.proj, "hero-hop").run(log=quiet), "awaiting_gate")
+        pipe = Pipeline(self.proj, "hero-hop")
+        self.assertEqual(pipe.pending_gate().gate, "P")
+        a = self.proj.asset("hero-hop")
+        self.assertEqual(a.state.steps["anim_poses"].version, 2)
+        prompt = rd(os.path.join(a.dir, a.state.steps["anim_poses"].info["dir"], "pose_prompt.txt"))
+        self.assertIn("smaller jump", prompt)
+        pipe.decide(True)
+        self.assertEqual(Pipeline(self.proj, "hero-hop").run(log=quiet), "awaiting_gate")   # the note is used once
+        self.assertEqual(Pipeline(self.proj, "hero-hop").pending_gate().gate, "R")
+        self.assertEqual(self.proj.asset("hero-hop").state.steps["anim_poses"].version, 2)
+
     def test_character_must_be_finished(self):
         self.proj.new_asset("raw", {"prompt": "x"})
         self.proj.new_asset("raw-walk", {"kind": "animation", "character": "raw", "prompt": "walk"})
@@ -101,6 +142,7 @@ class AnimationTests(unittest.TestCase):
             Pipeline(self.proj, "raw-walk").run(auto_approve=True, log=quiet)
 
     def test_frames_drawn_one_by_one_from_previous_frame(self):
+        self.proj.config["finish"]["mode"] = "artist"   # the model-drawn animation path
         n = 3
 
         def sheet_b64():
@@ -165,6 +207,7 @@ class AnimationTests(unittest.TestCase):
         self.assertFalse(magenta(0, 2))
 
     def test_a_limit_stops_the_frames_honestly_and_resumes(self):
+        self.proj.config["finish"]["mode"] = "artist"   # the model-drawn animation path
         # review finding F06: a spending stop used to copy frames forward and still reach the review as complete
         n = 3
 

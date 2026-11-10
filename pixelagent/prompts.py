@@ -137,6 +137,12 @@ same ground line, full body visible, no overlap. Plain flat light-grey backgroun
 no shadows. Animation: {summary}. Frames, left to right:
 {frames}"""
 
+# the pose sheet for the reduce finish: its figures are reduced straight into the frames
+POSE_SHEET_SOFT = """
+Style: draw every frame exactly like the FIRST reference image (the concept): the same smooth, clean anime
+illustration, colours and proportions -- NOT pixel art, no visible pixels (the second reference is only a small
+sprite for the design). Keep each frame's face clearly visible and the same size in every frame."""
+
 ANIM_FRAME = """You are animating the game character '{name}' with the pixelliner tools: frame {k1} of {n} of the
 '{anim}' animation. Pose for this frame: {pose}
 

@@ -126,7 +126,9 @@ def estimates():
     """The estimates the app shows: a character costs far less when the finish is the reduction (no drawing)."""
     from ..config import load_config
     mode = load_config().get("finish", {}).get("mode", "artist")
-    return {**ESTIMATES, "character": REDUCE_CHARACTER} if mode == "reduce" else ESTIMATES
+    # animations: plan + pose sheet only (~$0.10), no per-frame drawing
+    return ({**ESTIMATES, "character": REDUCE_CHARACTER, "animation_base": 0.15, "animation_per_frame": 0.0}
+            if mode == "reduce" else ESTIMATES)
 
 
 def spend_check(settings, pid=None, aid=None):

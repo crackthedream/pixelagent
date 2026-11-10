@@ -38,6 +38,11 @@ def character(ctx):
             "project": ch.output("export", "project"), "palette": meta["palette"]}
 
 
+def reduce_mode(ctx):
+    """The reduce finish (soft look): frames are the pose sheet's own reductions, like the character itself."""
+    return ctx.cfg.get("finish", {}).get("mode") == "reduce"
+
+
 def load_plan(ctx):
     with open(ctx.input("anim_plan", "plan"), encoding="utf-8") as f:
         return AnimationSpec.model_validate_json(f.read())
@@ -79,6 +84,9 @@ def poses(ctx):
     frames_txt = "\n".join(f"{i + 1}) {f.pose}" for i, f in enumerate(spec.frames))
     prompt = prompts.POSE_SHEET.format(n=n, view=ch["spec"].view.replace("_", "-"), summary=spec.summary,
                                        frames=frames_txt)
+    if reduce_mode(ctx):
+        # the frames are reduced straight from this sheet: it must be drawn like the concept, not as pixel art
+        prompt += prompts.POSE_SHEET_SOFT
     notes = ctx.notes()
     if notes:
         prompt += "\nChanges requested: " + "; ".join(notes)
@@ -132,7 +140,8 @@ def traces(ctx):
     sprite = imaging.load_rgba(ch["png"])
     sb = imaging.content_bbox(sprite, 1)
     margin = int(ctx.style["canvas_margin"])
-    ol = 0 if ch["spec"].outline == "none" else 1
+    soft = reduce_mode(ctx)
+    ol = 0 if ch["spec"].outline == "none" or soft else 1   # the reduce finish adds no outline ring
     body_h = (sb[3] - sb[1]) - 2 * ol                 # the approved sprite's height without its outline
     heights = sorted(b[3] - b[1] for b in boxes)
     s = heights[len(heights) // 2] / float(body_h)    # one scale for all frames: median figure = sprite height
@@ -164,7 +173,10 @@ def traces(ctx):
                     if 0 <= tx < W and row[x * 4 + 3]:
                         canvas_img[(ty * W + tx) * 4:(ty * W + tx) * 4 + 4] = row[x * 4:x * 4 + 4]
         labels = ["f" if canvas_img[k * 4 + 3] else None for k in range(W * H)]
-        art.merge_small_clusters(W, H, canvas_img, labels, int(ctx.cfg["pixelize"].get("min_cluster", 3)))
+        if soft:   # keep the soft shading: only near-identical specks merge, as in the character's reduction
+            art.merge_small_clusters(W, H, canvas_img, labels, min_size=2, max_dl=0.04)
+        else:
+            art.merge_small_clusters(W, H, canvas_img, labels, int(ctx.cfg["pixelize"].get("min_cluster", 3)))
         if ol:
             tmp = ctx.canvas.Document("t", W, H)
             tmp.layers[0].cels[0] = canvas_img
@@ -214,6 +226,22 @@ def draw(ctx):
     os.makedirs(agent_dir, exist_ok=True)
     start = os.path.join(agent_dir, "start_project")
     projectio.save_project(doc, start)
+
+    if reduce_mode(ctx):
+        # the frames ARE the pose sheet's reductions (no drawing, docs/FACE_ROOT_CAUSE.md). A note from the review
+        # (gate R) cannot change them here: it goes to the pose sheet, which is redone once per new note
+        drawing.cels = [bytearray(t) for t in traces]
+        ctx.save_project("project", doc)
+        notes = ctx.notes()
+        handled = int(ctx.asset.state.inputs.get("pose_notes_handled", 0))
+        if len(notes) > handled:
+            ctx.asset.state.inputs["pose_notes_handled"] = len(notes)
+            ctx.asset.state.inputs.setdefault("notes", {}).setdefault("anim_poses", []).extend(notes[handled:])
+            ctx.info["redo_from"] = "anim_poses"
+            ctx.info["proportions"] = "review note sent to the pose sheet"
+        ctx.info["reason"] = "[finish] mode = reduce: frames are the pose sheet's reductions (no drawing)"
+        _finish(ctx, doc, loop=spec.loop)
+        return
 
     from ..models import StubLLM
     if isinstance(ctx.backend.llm, StubLLM):

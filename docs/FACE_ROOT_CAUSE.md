@@ -187,6 +187,15 @@ shapes are reinvented. So the soft look now **finishes the sprite from the reduc
     realistic": too chibi). The measure-and-correct step is what reliably lands the proportions (batch 9/10,
     here 5/5).
   - Expected cost per character is therefore ~$0.25 (one retry) rather than $0.14.
+- **Animations in the reduce finish** (`anim.reduce_mode`):
+  - The frames are the pose sheet's own reductions: `anim_traces` already shrinks every figure at one shared scale
+    and maps it to the character's palette. In reduce mode it adds no outline ring and merges only near-identical
+    specks; `anim_draw` passes the traces through instead of the model drawing each frame (~$0.33 per frame).
+  - The pose sheet is asked for in the concept's smooth style, not pixel art (`prompts.POSE_SHEET_SOFT`).
+  - A note at gate R goes to the pose sheet: it is redone once per new note and waits at gate P.
+  - **First real walk** (ref08, 6 frames, `bench_runs_batch/assets/ref08-walk`): $0.06 in 78 s, against $1.46-1.95
+    for the model-drawn walks. Frames are consistent and in the character's soft style. The motion is subtle (a
+    kimono walk) and turned three-quarters to the side, as the sheet drew it.
 
 ## 5. Direction (as proposed before implementation)
 
