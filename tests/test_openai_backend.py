@@ -251,6 +251,7 @@ class OpenAIBackendTests(unittest.TestCase):
         # the soft look (default): even a clean reference is redrawn in the game's proportions and finish; the
         # restyled concept comes first (an automatic pick takes it), the reference itself stays a candidate
         self.assertEqual(self.proj.config["style"]["look"], "soft")
+        self.proj.config["finish"]["mode"] = "reduce"         # this class pins "repair"; the soft look's default
         flat = os.path.join(self.tmp, "flat.png")
         synth.draw_character(seed=2, size=384, background=(200, 200, 204))[0].save(flat)
         self.assertEqual(self._run("soft", {"references": [flat], "height": 40}), "complete")
@@ -261,11 +262,34 @@ class OpenAIBackendTests(unittest.TestCase):
         self.assertIn("do NOT keep the reference's body proportions", prompt)   # proportions lead, with numbers
         self.assertIn("4.6 heads tall", prompt)
         self.assertIn("22% of the full height", prompt)
+        self.assertIn("NOT a chibi", prompt)
         self.assertIn("not pixel art", prompt)
         self.assertIn("no heavy black outlines", prompt)
         self.assertNotIn("same proportions", prompt)
         spec = json.loads(open(a.output("intake", "spec"), encoding="utf-8").read())
         self.assertEqual((spec["heads_tall"], spec["outline"]), (4.6, "soft"))
+        # the critic is told the soft style is intended (no requests to cut colours or remove single pixels)
+        critic = [kw for name, kw in self.client.log if name == "parse" and "senior pixel artist reviewing" in str(kw)]
+        self.assertTrue(critic and "STYLE (by design" in str(critic[-1]), "critic prompt lacks the soft-style note")
+
+    def test_soft_look_redoes_a_concept_with_wrong_proportions_once(self):
+        from unittest import mock
+        self.proj.config["finish"]["mode"] = "reduce"
+        flat = os.path.join(self.tmp, "flat.png")
+        synth.draw_character(seed=2, size=384, background=(200, 200, 204))[0].save(flat)
+        # first measurement: far too tall (head too small) -> one redo with a correction; still off -> kept
+        with mock.patch("pixelagent.face.heads_tall", side_effect=[6.2, 6.0]):
+            self.assertEqual(self._run("tall", {"references": [flat], "height": 40}), "complete")
+        a = self.proj.asset("tall")
+        self.assertEqual(a.state.steps["concept"].version, 2)
+        self.assertEqual(a.state.inputs["proportion_retries"], 1)
+        note = a.state.inputs["notes"]["concept"][0]
+        self.assertIn("6.2 heads tall", note)
+        self.assertIn("LARGER", note)
+        edits = [kw["prompt"] for name, kw in self.client.log if name == "edit"]
+        self.assertTrue(any("LARGER" in p for p in edits), "the redo's prompt carries the correction")
+        self.assertIn("kept", a.state.steps["materials"].info["proportions"])
+        self.assertEqual(a.state.steps["materials"].info["heads_tall_measured"], 6.0)
 
     def _repair_case(self, second_overall):
         bad = Critique(overall=6.0, verdict="repair", issues=[

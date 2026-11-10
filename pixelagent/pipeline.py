@@ -274,6 +274,14 @@ class Pipeline:
                 else:
                     rec.status = "done"
                 self.asset.save()
+                redo = rec.info.pop("redo_from", None) if rec.status == "done" else None
+                if redo:
+                    # a step found its input unusable (e.g. the concept's proportions): redo from that step, once per
+                    # request (the step keeps count); at a gate the new result waits for approval as usual
+                    self.asset.save()
+                    log(f"[{s.index:02d} {s.name}] {rec.info.get('proportions', 'redo requested')} -> redoing from {redo}")
+                    self.reset_from(redo)
+                    return self.run(auto_approve=auto_approve, until=until, log=log)
             if rec.status == "awaiting_gate":
                 dec = st.gates.get(s.gate)
                 if dec is None and auto_approve:

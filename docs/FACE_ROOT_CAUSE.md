@@ -143,6 +143,27 @@ shapes are reinvented. So the soft look now **finishes the sprite from the reduc
 - **Free test** on the three soft-look runs (`bench_runs_reduce`, stand-in models): all three look like their
   concepts at 1× and 2× (ref01's green eyes and laugh, ref05, ref03), with 97-100 colours.
 - **`mode = "artist"`** keeps the drawing finish (and the face kit) for the classic look and small sprites.
+- **First fresh run** (ref09 from its reference, $0.15, 3 min) looked like its concept. It showed three issues,
+  now fixed:
+  1. **Too chibi** (~3 heads tall): the restyle prompt now says "NOT a chibi or super-deformed figure (a head of a
+     third of the height or more is too big)". Not yet confirmed on a new concept.
+  2. **Eyes lightened** by cluster averages: `build.reduce_material` gives the darkest shade of every material
+     from its darkest third, and focal materials (at least 6 shades) also keep their lightest. The darkest eye
+     value on ref09 went 83 → 75 (plain shrink: 74).
+  3. **The critic judged by strict-palette rules:** in reduce mode the plan's `max_colors` is the reduce budget,
+     and the critic gets `prompts.CRITIC_SOFT` (many soft shades and single shading pixels are intended). Lint
+     scores are information only for this look.
+- **Second fresh run** (ref10, $0.14): the critic now judges the soft style sensibly (palette 8, cleanliness 7; its
+  issues are pose, small eyes, hands, feet). The proportions overshot the other way: ~5.7 heads, because a seated
+  reference needed invented legs. Prompt wording alone cannot hold the proportions.
+- **Measure and retry:**
+  - `face.heads_tall` measures the reduced figure: height over hair-top-to-chin. On saved runs: ref09 2.79, ref10
+    5.68, the soft-look runs the owner liked 3.27-3.65, the realistic 160-px ref01 6.04.
+  - `materials.proportion_check` runs when the labels exist. Outside `[concept] heads_range` (3.2-5.2), it adds a
+    correction note to the concept ("make the head LARGER/SMALLER relative to the body") and sets `redo_from`.
+  - The pipeline then redoes from the concept, once (`proportion_retries`). At gate B the new concept waits for
+    approval as usual; test runs never retry.
+  - Cost: ~$0.11 more, only when a concept misses.
 
 ## 5. Direction (as proposed before implementation)
 

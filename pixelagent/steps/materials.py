@@ -13,6 +13,39 @@ from ..schemas import ClusterLabel, MaterialLabels
 from . import matmap
 
 
+def proportion_check(ctx, img, labels, w, h):
+    """The soft look's proportions vary a lot between concepts (2.8 and 5.7 heads tall for a 4.6 target, 2026-11-10):
+    measure them on the reduced sprite, and when they fall outside [concept] heads_range, ask for the concept to be
+    redone once with a correction (pipeline: info 'redo_from')."""
+    from ..face import heads_tall
+    from ..models import StubImages
+    spec = ctx.spec()
+    if spec.asset_type != "character" or ctx.style.get("look") != "soft":
+        return
+    ccfg = ctx.cfg.get("concept", {})
+    lo, hi = (float(v) for v in ccfg.get("heads_range", [3.2, 5.2]))
+    ht = heads_tall(img, labels, w, h)
+    ctx.info["heads_tall_measured"] = round(ht, 2) if ht else None
+    if ht is None or lo <= ht <= hi:
+        return
+    inputs = ctx.asset.state.inputs
+    done = int(inputs.get("proportion_retries", 0))
+    if done >= int(ccfg.get("proportion_retries", 1)) or isinstance(ctx.backend.images, StubImages):
+        ctx.info["proportions"] = f"{ht:.1f} heads tall, outside {lo:g}-{hi:g}; kept (no retry left or a test run)"
+        return
+    target = float(spec.heads_tall or ctx.style.get("heads_tall", 4.6))
+    if ht > hi:
+        fix = "make the head LARGER relative to the body (a shorter torso and shorter legs)"
+    else:
+        fix = "make the head SMALLER relative to the body (a longer torso and longer legs; not chibi)"
+    note = (f"Proportions: the last version came out about {ht:.1f} heads tall; it must be about {target:g} heads "
+            f"tall: {fix}. Keep everything else the same.")
+    inputs["proportion_retries"] = done + 1
+    inputs.setdefault("notes", {}).setdefault("concept", []).append(note)
+    ctx.info["proportions"] = note
+    ctx.info["redo_from"] = "concept"
+
+
 def run(ctx):
     spec = ctx.spec()
     art = ctx.art
@@ -74,6 +107,7 @@ def run(ctx):
                   ["#%02x%02x%02x" % c for c in centers], "cluster_material": mat_of_cluster,
                   "label_source": ctx.info["label_source"]})
     ctx.save_json("labelmap", "labelmap.json", {"width": w, "height": h, "labels": labelmap})
+    proportion_check(ctx, base, labelmap, w, h)
     ctx.save_image("ramps", "ramps.png", _ramps_sheet(materials))
     ctx.save_image("labels", "labels.png", _label_preview(w, h, labelmap, materials))
     ctx.info.update(materials=[m_["name"] for m_ in materials], extras=len(extras),

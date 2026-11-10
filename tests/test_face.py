@@ -51,6 +51,22 @@ class FaceTests(unittest.TestCase):
         self.assertGreaterEqual(L["eye_y"], L["fringe_y"])
         self.assertTrue(L["eye_y"] + 5 < L["mouth_y"] < L["chin_y"])
 
+    def test_heads_tall_from_the_face(self):
+        from pixelagent.face import heads_tall
+        # a 60-px figure whose head (hair from y=10, face to the chin at y=24) is 15 px: 4 heads tall
+        w, h = 40, 80
+        im = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+        labels = [None] * (w * h)
+        def paint(x0, y0, x1, y1, col, lab):
+            for y in range(y0, y1):
+                for x in range(x0, x1):
+                    im.putpixel((x, y), col)
+                    labels[y * w + x] = lab
+        paint(10, 10, 30, 14, (90, 50, 40, 255), "hair")
+        paint(12, 14, 28, 25, (*SKIN, 255), "skin")
+        paint(17, 25, 23, 70, (60, 60, 120, 255), "dress")
+        self.assertAlmostEqual(heads_tall(im, labels, w, h), 60 / 15, places=1)
+
 
 if __name__ == "__main__":
     unittest.main()

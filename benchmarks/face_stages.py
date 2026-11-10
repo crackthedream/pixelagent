@@ -20,7 +20,7 @@ OUT = sys.argv[1]
 CASES = sys.argv[2:]
 STAGES = [("pixelize", "04_pixelize/v001/pixel_base.png"), ("palette", "06_rebuild/v001/rebuild.png"),
           ("outline", "07_lines/v001/lines.png"), ("trace (polish)", "09_polish/v001/polish.png"),
-          ("model draw", "10_artist/v001/agent/face_measure.png"), ("face pass", "10_artist/v001/artist.png")]
+          ("model draw", "10_artist/v001/agent/face_measure.png"), ("final (artist step)", "10_artist/v001/artist.png")]
 
 
 def lin(a):
@@ -99,6 +99,8 @@ for d in CASES:
     tiles = [("concept", ccrop)]
     imgs = [("plain reduction", avg), ("feature-keeping reduction", feat)]
     for name, rel in STAGES:
+        if not os.path.exists(os.path.join(d, "steps", rel)):   # e.g. no drawing in the reduce finish
+            continue
         a = np.asarray(Image.open(os.path.join(d, "steps", rel)).convert("RGBA")).astype(float)[y:y + h, x:x + w]
         imgs.append((name, a[..., :3]))
     for name, rgb in imgs:

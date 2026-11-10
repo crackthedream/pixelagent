@@ -33,7 +33,10 @@ def _evaluate(ctx, doc, tag, ref=None):
         return Critique(scores=Scores(cleanliness=round(s, 1)), overall=round(s, 1), issues=issues,
                         verdict="pass" if not any(i.severity == "high" for i in issues) else "repair")
 
-    crit = ctx.backend.llm.structured("critic", prompts.CRITIC.format(light=spec.light, lint=json.dumps(lint)),
+    note = (prompts.CRITIC_SOFT.format(colors=spec.max_colors)
+            if ctx.cfg.get("finish", {}).get("mode") == "reduce" else "")
+    crit = ctx.backend.llm.structured("critic", prompts.CRITIC.format(light=spec.light, lint=json.dumps(lint),
+                                                                      style_note=note),
                                       spec.model_dump_json(), [pg, p1, ctx.input("concept", "concept")], Critique, stub)
     fid = art.fidelity(doc.w, doc.h, data, ref)["delta_e"] if ref is not None else 0.0
     weight = float(ctx.cfg.get("detail", {}).get("fidelity_weight", 15.0))

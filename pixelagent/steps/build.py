@@ -55,12 +55,46 @@ def _kmeans(x, k, iters=12):
     return assign
 
 
+def is_focal(material):
+    m = material.lower().replace("-", "_")
+    return m.startswith(FOCAL) or "eye" in m or "mouth" in m
+
+
+def reduce_material(rgb, k, focal=False):
+    """One material's pixels (N, 3) -> (per-pixel colours (N, 3) uint8, the colours used). k-means in OKLab with
+    k shades. A cluster's mean lightens its darkest members -- lines, lashes and pupils went grey (ref09,
+    2026-11-10) -- so the darkest cluster takes the mean of its darkest third; focal materials also keep their
+    lightest (catchlights, eye whites) from the lightest third."""
+    import numpy as np
+    k = int(min(k, len(np.unique(rgb, axis=0))))
+    lab = _oklab(rgb)
+    assign = _kmeans(lab, k) if k > 1 else np.zeros(len(rgb), int)
+    means = {j: lab[assign == j, 0].mean() for j in range(k) if (assign == j).any()}
+    darkest = min(means, key=means.get) if means else None
+    lightest = max(means, key=means.get) if means else None
+    out = np.zeros((len(rgb), 3), np.uint8)
+    used = []
+    for j in sorted(means):
+        sel = assign == j
+        members = rgb[sel]
+        if len(means) > 1 and (j == darkest or (focal and j == lightest)):
+            L = lab[sel, 0]
+            pick = L <= np.quantile(L, 1 / 3) if j == darkest else L >= np.quantile(L, 2 / 3)
+            members = members[pick] if pick.any() else members
+        col = np.clip(np.round(members.mean(0)), 0, 255).astype(np.uint8)
+        out[sel] = col
+        used.append(col)
+    return out, used
+
+
 def soft_reduce(ctx):
     """Finish mode 'reduce' (the soft look): the final sprite comes from the concept's own reduction onto the grid
     (pixelize), which keeps the face, the eye colours and the soft shading that the model's redraw and a 40-colour
     ramp palette lost (docs/FACE_ROOT_CAUSE.md). Each material gets its own colours by k-means in OKLab -- a share of
-    the budget by the square root of its area, at least 4 for focal materials (eyes, mouth, blush), so small
-    features keep their colour -- then only near-identical specks merge."""
+    the budget by the square root of its area, at least 6 for focal materials (eyes, mouth, blush), so small
+    features keep their colour; the darkest shade of every material (and the lightest of focal ones) comes from its
+    extreme pixels rather than the cluster mean, so lines, lashes and pupils stay crisp -- then only near-identical
+    specks merge."""
     import numpy as np
     canvas = ctx.canvas
     base = imaging.load_rgba(ctx.input("pixelize", "pixel_base"))
@@ -81,21 +115,14 @@ def soft_reduce(ctx):
     palette, counts = {}, {}
     for m, ix in groups.items():
         ix = np.array(ix)
-        rgb = src[ix, :3].astype(float)
-        focal = m.lower().replace("-", "_").startswith(FOCAL) or any(f in m.lower() for f in ("eye", "mouth"))
-        k = max(4 if focal else 2, round(budget * weight[m] / total))
-        uniq = np.unique(rgb, axis=0)
-        k = int(min(k, len(uniq)))
-        assign = _kmeans(_oklab(rgb), k) if k > 1 else np.zeros(len(ix), int)
-        for j in range(k):
-            sel = assign == j
-            if not sel.any():
-                continue
-            col = np.clip(np.round(rgb[sel].mean(0)), 0, 255).astype(np.uint8)
-            out[ix[sel], :3] = col
-            out[ix[sel], 3] = 255
+        focal = is_focal(m)
+        k = max(6 if focal else 2, round(budget * weight[m] / total))
+        colours, cols = reduce_material(src[ix, :3].astype(float), k, focal)
+        out[ix, :3] = colours
+        out[ix, 3] = 255
+        for j, col in enumerate(cols):
             palette[f"{m}{j}"] = (int(col[0]), int(col[1]), int(col[2]), 255)
-        counts[m] = k
+        counts[m] = len(cols)
     data = bytearray(out.astype(np.uint8).tobytes())
     merged = ctx.art.merge_small_clusters(w, h, data, labels, min_size=2, max_dl=0.04)
     order = [m["name"] for m in sorted(mats, key=lambda m: m["pixels"])]

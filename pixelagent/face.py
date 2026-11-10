@@ -104,3 +104,19 @@ def face_layout(img, box, tol=0.16):
     mouth_y = min(eye_y + eh + max(1, round(below * 0.45)), max(eye_y + eh + 1, chin_y - 1))
     return {"skin": "#%02x%02x%02x" % skin, "skin_w": skin_w, "left": left, "right": right - 1, "fringe_y": fringe_y,
             "chin_y": chin_y, "cx": cx, "size": size, "gap": gap, "eye_y": eye_y, "mouth_y": mouth_y}
+
+
+def heads_tall(img, labels, width, height):
+    """How many head-heights tall the figure is: its height over the head (top of the hair to the chin, the chin from
+    face_layout). None when no face is found."""
+    from .artist import face_region
+    box = face_region(labels, width, height)
+    if not box:
+        return None
+    im = img.convert("RGBA")
+    L = face_layout(im, box)
+    bb = im.getbbox()
+    if not L or not bb:
+        return None
+    head = L["chin_y"] - bb[1] + 1
+    return (bb[3] - bb[1]) / head if head > 3 else None

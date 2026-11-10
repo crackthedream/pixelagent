@@ -15,8 +15,8 @@ ground, no text. Subject: {summary}. Must keep: {must_keep}.{look}"""
 # as a description of the look, without naming any game or character, so the image model restyles rather than copies.
 LOOK_SOFT = """
 Art style (this matters as much as the design): a cute anime-style character for a 2D side-scrolling action game.
-Proportions about {heads} heads tall: a LARGE head (with the hair about a fifth of the full height) with a large,
-soft face, big expressive anime eyes set fairly low in the face, a tiny nose and a small mouth; a small, slim body
+Proportions about {heads} heads tall: a LARGE head (with the hair about a fifth of the full height; NOT chibi or
+super-deformed) with a large, soft face, big expressive anime eyes set fairly low in the face, a tiny nose and a small mouth; a small, slim body
 with short slender limbs and small hands and feet. A smooth, clean digital illustration (not pixel art, no visible
 pixels). Light, soft, pastel-leaning colours, gentle low-contrast shading, soft coloured edges, no heavy black
 outlines. Costume simplified into a few large clear shapes: keep the
@@ -37,9 +37,10 @@ separation between materials, soft single light from the {light}, no cast shadow
 RESTYLE_REFERENCE = """Restyle the character in this image into a full-body concept for a cute 2D side-scrolling
 action game.
 PROPORTIONS FIRST -- do NOT keep the reference's body proportions: the figure is about {heads} heads tall, so the
-head (with hair) is about {head_pct}% of the full height. A large head and a large, soft face with big expressive
-anime eyes set fairly low, a tiny nose and a small mouth. A small, slim body: short torso, short slender legs (about
-40% of the height), small hands and feet.
+head (with hair) is about {head_pct}% of the full height -- about one fifth, NOT a chibi or super-deformed figure
+(a head of a third of the height or more is too big). A large head and a large, soft face with big expressive
+anime eyes set fairly low, a tiny nose and a small mouth. A small, slim body: short torso, slender legs (about 40%
+of the height), small hands and feet.
 Keep who the character is: the expression, hairstyle and hair colour, eye colour, costume colours and the signature
 accessories. Character: {summary}. Must keep: {must_keep}.
 Finish: a smooth, clean digital anime illustration (not pixel art, no visible pixels); light, pastel-leaning colours,
@@ -111,8 +112,16 @@ LOCAL issue give region = [x, y, w, h] in sprite pixel coordinates, tight around
 the first image is the sprite zoomed with a grid labelled every 8 px (x right, y down, origin top-left).
 verdict: pass if overall >= 8 and no high-severity issue, else repair.
 Size convention (by design, do not report it as an issue): height_px is the sprite's height INCLUDING its
-outline; the canvas adds a transparent margin on every side, so the canvas is larger than height_px.
+outline; the canvas adds a transparent margin on every side, so the canvas is larger than height_px.{style_note}
 Objective lint results: {lint}"""
+
+# the critic's note for the soft look's reduce finish (config [finish] mode = "reduce")
+CRITIC_SOFT = """
+STYLE (by design, do not report it as an issue): this game's look is SOFT, like hand-made anime action-game
+sprites. Many gentle shades (up to {colors} colours), soft anti-aliased edges, single-pixel shading steps and no
+dark outline ring are intended; do not ask to reduce colours, remove single pixels, add an outline or harden edges.
+Judge what matters for this look: readability at 1x, proportions, identity against the concept, the face and its
+expression, hands and held items. The lint counts below follow strict-palette rules: treat them as information."""
 
 ANIM_PLAN = """You plan a pixel-art sprite animation for an approved game character (images: the approved sprite,
 then its concept art). User request: "{request}".

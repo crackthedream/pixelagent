@@ -150,6 +150,8 @@ class PipelineTests(Base):
         self.assertEqual(res["metrics"]["components"], 1, "sprite should be one connected shape")
         st = a.state.steps
         self.assertEqual(st["rebuild"].info["mode"], "reduce")
+        spec = json.loads(rd(a.output("intake", "spec")))
+        self.assertEqual(spec["max_colors"], budget)                     # the critic is told the reduce budget
         self.assertEqual((st["lines"].status, st["detail"].status), ("skipped", "skipped"))
         self.assertEqual(st["artist"].status, "done")                    # the reduction passed through as the result
         self.assertIn("reduce", st["artist"].info["reason"])
@@ -160,6 +162,22 @@ class PipelineTests(Base):
         self.assertTrue(calls and all(c["model"] == "stub" for c in calls))
         self.assertEqual({c["role"] for c in calls if c["kind"] == "llm"}, {"director", "vision_pick", "critic"})
         self.assertTrue(os.path.exists(os.path.join(a.dir, "review", "index.html")))
+
+    def test_reduce_keeps_dark_lines_and_eye_highlights(self):
+        import numpy as np
+        from pixelagent.steps.build import is_focal, reduce_material
+        rng = np.random.default_rng(0)
+        # an iris: a mid-blue body, a few near-black pupil/lash pixels and a few near-white catchlight pixels
+        body = np.clip(rng.normal((70, 100, 200), 12, (120, 3)), 0, 255)
+        dark = np.clip(rng.normal((25, 25, 45), 4, (8, 3)), 0, 255)
+        light = np.clip(rng.normal((245, 245, 250), 3, (6, 3)), 0, 255)
+        rgb = np.vstack([body, dark, light])
+        lum = lambda c: 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]  # noqa: E731
+        out, used = reduce_material(rgb, 6, focal=True)
+        self.assertLessEqual(len(used), 6)
+        self.assertLess(min(lum(c) for c in used), lum(dark.mean(0)) + 8)        # the pupil stays near-black
+        self.assertGreater(max(lum(c) for c in used), lum(light.mean(0)) - 8)    # the catchlight stays bright
+        self.assertTrue(is_focal("eye_irises") and is_focal("mouth") and not is_focal("hair"))
 
     def test_artist_finish_dry_run(self):
         # the drawing finish (classic): ramp palette, outline ring, polish; a stub model passes the trace through

@@ -52,6 +52,9 @@ max_unknown = 0.15           # max share of concept pixels whose map colour matc
 
 [concept]
 refine_after_pick = false    # true: after gate B, polish the picked draft with images.edit on image_final
+heads_range = [3.2, 5.2]     # soft look: a concept whose reduced figure is outside this many heads tall is redone
+proportion_retries = 1       # ... at most this many times, with a correction note (2.8 and 5.7 seen for 4.6;
+                             # the soft-look runs the owner liked measured 3.3-3.65)
 clean_reference = "auto"     # "auto": redraw a reference into a clean full-body concept (images.edit) when it has
                              # scenery or a partial figure; true: always also redraw; false: never (convert as is)
 
