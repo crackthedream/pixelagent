@@ -98,7 +98,7 @@ class AnimationTests(unittest.TestCase):
     def test_reduce_frames_are_the_pose_sheet_reductions(self):
         # the reduce finish (default): no drawing; each frame is its pose-sheet figure reduced onto the character's
         # grid and palette, with no outline ring
-        self.assertIn(self.proj.config["finish"]["mode"], ("reduce", "native"))   # both animate from the sheet
+        self.proj.config["finish"]["mode"] = "reduce"
         pipe = self._anim("hero-wave", "wave", 4)
         self.assertEqual(pipe.run(auto_approve=True, log=quiet), "complete")
         a = self.proj.asset("hero-wave")
@@ -113,6 +113,29 @@ class AnimationTests(unittest.TestCase):
             trace = imaging.to_bytes(imaging.load_rgba(a.output("anim_traces", f"trace{i}")))
             self.assertEqual(frame, trace, i)
             self.assertNotIn(oc, {tuple(frame[k:k + 3]) for k in range(0, len(frame), 4) if frame[k + 3]})
+
+    def test_native_frames_are_the_pixel_art_sheet_read_back(self):
+        # the native finish (default): the sheet is drawn as pixel art on one block grid; every frame is its figure
+        # read back pixel for pixel (the stand-in sheet is the character's own sprite as blocks, so every frame
+        # must equal that sprite exactly)
+        self.assertEqual(self.proj.config["finish"]["mode"], "native")
+        pipe = self._anim("hero-bob", "bob", 4)
+        self.assertEqual(pipe.run(auto_approve=True, log=quiet), "complete")
+        a = self.proj.asset("hero-bob")
+        block = a.state.steps["anim_poses"].info["block"]
+        self.assertGreaterEqual(block, 3)
+        prompt = rd(os.path.join(a.dir, a.state.steps["anim_poses"].info["dir"], "pose_prompt.txt"))
+        self.assertIn("hand-pixelled", prompt)
+        self.assertIn(f"{block}x{block}", prompt)
+        sprite = imaging.load_rgba(self.proj.asset("hero").output("export", "png"))
+        sprite = sprite.crop(sprite.getbbox())
+        want = imaging.to_bytes(sprite)
+        for i in range(4):
+            f = imaging.load_rgba(a.output("anim_draw", f"frame{i}"))
+            f = f.crop(f.getbbox())
+            self.assertEqual(f.size, sprite.size, i)
+            got = imaging.to_bytes(f)
+            self.assertLessEqual(max(abs(got[k] - want[k]) for k in range(len(got)) if k % 4 != 3 and got[k - k % 4 + 3]), 3, i)
 
     def test_reduce_review_note_goes_to_the_pose_sheet(self):
         pipe = self._anim("hero-hop", "hop", 3)

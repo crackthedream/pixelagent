@@ -190,6 +190,15 @@ Style: draw every frame exactly like the FIRST reference image (the concept): th
 illustration, colours and proportions -- NOT pixel art, no visible pixels (the second reference is only a small
 sprite for the design). Keep each frame's face clearly visible and the same size in every frame."""
 
+# the pose sheet for the native finish: every frame drawn as pixel art on one shared block grid, read back per frame
+POSE_SHEET_PIXEL = """
+Style: draw every frame as an authentic hand-pixelled sprite exactly like the FIRST reference image (the character's
+pixel-art sprite): the same design, palette, proportions and pixel style. Each sprite is about {height} pixels tall;
+show the sheet enlarged so that every sprite pixel is a crisp, perfectly square block of exactly {block}x{block}
+image pixels, on ONE regular grid shared by all frames (nearest-neighbour: no smoothing, no blur). Do NOT draw grid
+lines or pixel borders. Clean clusters of flat tones, no gradients, no dithering, no dark outline around the figure;
+the face a few designed pixels, the same size in every frame."""
+
 ANIM_FRAME = """You are animating the game character '{name}' with the pixelliner tools: frame {k1} of {n} of the
 '{anim}' animation. Pose for this frame: {pose}
 

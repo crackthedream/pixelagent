@@ -36,6 +36,10 @@ def _autocorr_period(profile, lo, hi):
     pr = profile - profile.mean()
     ac = np.correlate(pr, pr, "full")[len(pr) - 1:]
     ac = ac / (ac[0] + 1e-9)
+    # neighbouring pixels resemble each other, so the correlation is high at every small lag: remove that smooth
+    # trend, or the smallest period always wins (a 3-px pose sheet read as 2 px, 2026-11-10)
+    w = int(2 * hi) + 1
+    ac = ac - np.convolve(np.pad(ac, w, mode="edge"), np.ones(w) / w, "same")[w:-w]
     n = len(ac)
 
     def at(x):
@@ -72,21 +76,27 @@ def _walk(profile, p, length):
     return edges
 
 
-def find_grid(img, expected=None):
+def find_grid(img, expected=None, period=None):
     """The block grid of an image of crisp blocks: {'p': mean block size, 'x0', 'y0': the first block edges, 'xs',
     'ys': every block edge (following the drift of an image model's pixels)}. `expected`: the block size asked for;
     the search stays within 0.7-1.45x of it (rules out half and double: image models sometimes draw small details at
-    half size, ref02 and ref08 read back at twice the size, 2026-11-10)."""
+    half size, ref02 and ref08 read back at twice the size, 2026-11-10). `period`: a block size already known (one
+    measured on a whole pose sheet): only the edges are walked, so every frame shares it."""
     a = np.asarray(img.convert("RGB")).astype(np.int32)
     H, W = a.shape[:2]
-    lo, hi = (max(3.0, expected * 0.7), expected * 1.45) if expected else (4.0, 16.0)
+    lo, hi = (max(2.0, expected * 0.7), expected * 1.45) if expected else (4.0, 16.0)
     profx = np.abs(np.diff(a, axis=1)).sum(-1).sum(0).astype(float)
     profy = np.abs(np.diff(a, axis=0)).sum(-1).sum(1).astype(float)
-    px, py = _autocorr_period(profx, lo, hi), _autocorr_period(profy, lo, hi)
-    p = (px + py) / 2.0                                   # square blocks
-    xs, ys = _walk(profx, p, W), _walk(profy, p, H)
-    return {"p": round(p, 3), "x0": round(xs[0], 3), "y0": round(ys[0], 3),
-            "xs": [round(v, 2) for v in xs], "ys": [round(v, 2) for v in ys]}
+    if period:
+        px = py = float(period) if not isinstance(period, (list, tuple)) else None
+        if px is None:
+            px, py = (float(v) for v in period)
+    else:
+        # each axis on its own: an image model's blocks are often not square (9.4 x 11.0 px seen)
+        px, py = _autocorr_period(profx, lo, hi), _autocorr_period(profy, lo, hi)
+    xs, ys = _walk(profx, px, W), _walk(profy, py, H)
+    return {"p": round((px + py) / 2, 3), "px": round(px, 3), "py": round(py, 3), "x0": round(xs[0], 3),
+            "y0": round(ys[0], 3), "xs": [round(v, 2) for v in xs], "ys": [round(v, 2) for v in ys]}
 
 
 def read_blocks(img, grid):
@@ -128,7 +138,7 @@ def cut_background(cells, tol=24):
     return ~bg
 
 
-def sprite_from_pixel_art(img, margin=2, grid=None, expected=None):
+def sprite_from_pixel_art(img, margin=2, grid=None, expected=None, period=None):
     """An image of a pixel-art sprite drawn as crisp blocks -> (the sprite at 1x as RGBA with `margin` transparent
     pixels around it, geometry in the pipeline's convention: sprite pixel (X, Y) comes from the image area starting
     at gx0 + (X - margin + crop_x) * s, gy0 + (Y - margin + crop_y) * s). `grid` reuses a known grid (an area
@@ -138,7 +148,7 @@ def sprite_from_pixel_art(img, margin=2, grid=None, expected=None):
         flat = Image.new("RGBA", img.size, (222, 222, 226, 255))
         flat.alpha_composite(img)
         img = flat
-    grid = grid or find_grid(img, expected)
+    grid = grid or find_grid(img, expected, period)
     cells = read_blocks(img, grid)
     fig = cut_background(cells)
     ys, xs = np.nonzero(fig)

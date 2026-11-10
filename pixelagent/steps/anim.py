@@ -38,6 +38,21 @@ def character(ctx):
             "project": ch.output("export", "project"), "palette": meta["palette"]}
 
 
+def native_mode(ctx):
+    """The native finish: the pose sheet is drawn as pixel art and each frame is read back pixel for pixel."""
+    return ctx.cfg.get("finish", {}).get("mode") == "native"
+
+
+def _sheet_block(ch, n, size):
+    """Image pixels per sprite pixel for an n-frame pixel-art sheet of this character: as large as the sheet allows
+    (the sprite's height fits the sheet's height, n sprites fit its width with room between them)."""
+    sprite = imaging.load_rgba(ch["png"])
+    sb = imaging.content_bbox(sprite, 1)
+    sw, sh = max(1, sb[2] - sb[0]), max(1, sb[3] - sb[1])
+    W, H = (int(v) for v in size.split("x"))
+    return max(3, min(int(H * 0.82 / sh), int(W / n * 0.78 / sw))), sh
+
+
 def reduce_mode(ctx):
     """The reduce finish (soft look): frames are the pose sheet's own reductions, like the character itself."""
     # native characters animate through the same path for now (a pixel-art pose sheet is a later step)
@@ -85,7 +100,13 @@ def poses(ctx):
     frames_txt = "\n".join(f"{i + 1}) {f.pose}" for i, f in enumerate(spec.frames))
     prompt = prompts.POSE_SHEET.format(n=n, view=ch["spec"].view.replace("_", "-"), summary=spec.summary,
                                        frames=frames_txt)
-    if reduce_mode(ctx):
+    size = ctx.cfg.get("animation", {}).get("sheet_size", "1536x1024")
+    block = None
+    if native_mode(ctx):
+        block, sprite_h = _sheet_block(ch, n, size)
+        prompt += prompts.POSE_SHEET_PIXEL.format(block=block, height=sprite_h)
+        ctx.info["block"] = block
+    elif reduce_mode(ctx):
         # the frames are reduced straight from this sheet: it must be drawn like the concept, not as pixel art
         prompt += prompts.POSE_SHEET_SOFT
     notes = ctx.notes()
@@ -94,9 +115,27 @@ def poses(ctx):
     with open(ctx.path("pose_prompt.txt"), "w", encoding="utf-8") as f:
         f.write(prompt)
     sprite_ref = ctx.save_image(None, "sprite_ref.png", imaging.zoom(imaging.load_rgba(ch["png"]), 6))
-    size = ctx.cfg.get("animation", {}).get("sheet_size", "1536x1024")
+
+    def native_stub(k, out_dir):  # dry run, native: the sprite as crisp blocks, repeated with a little bob per frame
+        from PIL import Image
+        from ..pixelart import enlarge  # noqa: F401  (same block look as the image model's sheet)
+        sp = imaging.load_rgba(ch["png"])
+        sp = sp.crop(sp.getbbox())
+        big = sp.resize((sp.width * block, sp.height * block), Image.NEAREST)
+        W, H = (int(v) for v in size.split("x"))
+        cell = W // n
+        sheet = Image.new("RGBA", (W, H), (222, 222, 226, 255))
+        for i in range(n):
+            bob = block * int(round(2 * np.sin(i / n * 2 * np.pi)))
+            x = i * cell + (cell - big.width) // 2 // block * block
+            sheet.alpha_composite(big, (x, H - 40 - big.height - bob))
+        p = os.path.join(out_dir, "gen00.png")
+        sheet.convert("RGB").save(p)
+        return [p]
 
     def stub(k, out_dir):  # dry run: the concept repeated with a little bob and lean per frame
+        if block:
+            return native_stub(k, out_dir)
         from PIL import Image
         c = imaging.load_rgba(ch["concept"])
         W, H = (int(v) for v in size.split("x"))
@@ -144,11 +183,30 @@ def traces(ctx):
     soft = reduce_mode(ctx)
     ol = 0 if ch["spec"].outline == "none" or soft else 1   # the reduce finish adds no outline ring
     body_h = (sb[3] - sb[1]) - 2 * ol                 # the approved sprite's height without its outline
-    heights = sorted(b[3] - b[1] for b in boxes)
-    s = heights[len(heights) // 2] / float(body_h)    # one scale for all frames: median figure = sprite height
     ground = max(b[3] for b in boxes)                  # common ground line of the sheet
-    small = [imaging.pixelize(f, body_h, margin=0, scale=s, alpha_threshold=int(ctx.style["alpha_threshold"]))
-             for f in figs]
+    if native_mode(ctx):
+        # each figure is pixel art on the sheet's block grid: read it back pixel for pixel (no rescaling, so the
+        # frames keep the drawn pixels); one scale for the ground line = the median block size found
+        from ..pixelart import sprite_from_pixel_art
+        sheet = imaging.load_rgba(ctx.input("anim_poses", "sheet"))
+        block = ctx.asset.state.steps["anim_poses"].info.get("block") or 8
+        from ..pixelart import find_grid
+        g = find_grid(sheet, expected=block)               # ONE block size for every frame (sizes stay equal)
+        period = (g["px"], g["py"])
+        small, ps = [], []
+        for b in boxes:
+            pad = int(block * 2)
+            crop = sheet.crop((max(0, b[0] - pad), max(0, b[1] - pad), min(sheet.width, b[2] + pad),
+                               min(sheet.height, b[3] + pad)))
+            sp, geom = sprite_from_pixel_art(crop, margin=0, period=period)
+            small.append(sp.crop(sp.getbbox()) if sp.getbbox() else sp)
+            ps.append(geom["grid"]["p"])
+        s = sorted(ps)[len(ps) // 2]
+    else:
+        heights = sorted(b[3] - b[1] for b in boxes)
+        s = heights[len(heights) // 2] / float(body_h)    # one scale for all frames: median figure = sprite height
+        small = [imaging.pixelize(f, body_h, margin=0, scale=s, alpha_threshold=int(ctx.style["alpha_threshold"]))
+                 for f in figs]
     lifts = [int(round((ground - b[3]) / s)) for b in boxes]
     pad = margin + ol + 2                              # outline + margin + a little room for motion
     W = max(sprite.width, max(im.width for im in small) + 2 * pad)
@@ -174,7 +232,9 @@ def traces(ctx):
                     if 0 <= tx < W and row[x * 4 + 3]:
                         canvas_img[(ty * W + tx) * 4:(ty * W + tx) * 4 + 4] = row[x * 4:x * 4 + 4]
         labels = ["f" if canvas_img[k * 4 + 3] else None for k in range(W * H)]
-        if soft:   # keep the soft shading: only near-identical specks merge, as in the character's reduction
+        if native_mode(ctx):
+            pass   # pixel art as drawn: its single pixels are deliberate (eye highlights, strands)
+        elif soft:   # keep the soft shading: only near-identical specks merge, as in the character's reduction
             art.merge_small_clusters(W, H, canvas_img, labels, min_size=2, max_dl=0.04)
         else:
             art.merge_small_clusters(W, H, canvas_img, labels, int(ctx.cfg["pixelize"].get("min_cluster", 3)))

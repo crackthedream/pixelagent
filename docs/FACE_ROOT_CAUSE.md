@@ -295,7 +295,16 @@ drawn strands, each eye a distinct pixel shape. The reduce finish gives a soft b
 - **Rebuild:** 3-6 tones per material (`build.native_tones`, 6 for focal ones) through `reduce_material`, which
   keeps the darkest and lightest shades. No outline ring, no drawing; the critic gets `prompts.CRITIC_NATIVE`.
 - **Revisions** edit the pixel-art concept unscaled (no blur) and keep the grid for area fixes.
-- **Animations** still use the pose-sheet path of the reduce finish; a pixel-art pose sheet is a later step.
+- **Animations** (native): the pose sheet is drawn as pixel art on one shared block grid (`prompts.POSE_SHEET_PIXEL`).
+  The block is as large as the sheet allows for the frame count and sprite size (`anim._sheet_block`). One block
+  size is measured on the whole sheet, each frame is read back pixel for pixel on it, colours are mapped to the
+  character's palette, and no speck merging is done (single pixels are deliberate).
+- **Grid fixes found on the way:**
+  - the autocorrelation is detrended: it is high at every small lag, so the smallest period always won (a 3-px sheet
+    read as 2 px);
+  - each axis has its own block size: image models draw non-square blocks (9.4 × 11.0 px seen).
+- **First real pixel-art walk** (ref05, 6 frames, $0.07 in 85 s): consistent pixel-art frames in the character's
+  style with a real stepping motion, 168-174 px tall, about 6% taller than the 161-px standing sprite.
 - **Real run** (`bench_runs_native2`, ref08/02/05/03, $0.74): genuine pixel-art sprites with crisp clusters and
   pixel faces, 4.0-4.6 heads, 147-170 px, 30-56 colours. They are still darker and more saturated than Noel (dark
   hair and navy costumes), and the hair has darker edges in places.
