@@ -190,8 +190,10 @@ class AppServerTest(unittest.TestCase):
         self.assertEqual(self.ok(self.get("/api/overview"))["settings"]["grade"], "strong")
         from pixelagent.app.server import overrides
         self.assertEqual(overrides({**self.ok(self.get("/api/overview"))["settings"], "grade": "none"})["finish"],
-                         {"mode": "native", "grade": "none"})
+                         {"mode": "native", "grade": "none", "prop_grade": "soft"})
         self.ok(self.post("/api/settings", {"grade": "medium"}))
+        self.assertEqual(self.ok(self.get("/api/overview"))["settings"]["prop_grade"], "soft")    # objects: lighter
+        self.assertEqual(self.post("/api/settings", {"prop_grade": "neon"})[0], 400)
         self.assertEqual(self.ok(self.get("/api/overview"))["settings"]["sprite_height"], 160)
         self.ok(self.post("/api/settings", {"monthly_usd": 90, "sprite_height": 96}))
 
@@ -355,6 +357,7 @@ class AppServerTest(unittest.TestCase):
         self.assertEqual((spec["asset_type"], spec["height_px"]), ("prop", 32))
         self.assertEqual(a.state.steps["concept"].info["block"], 19)        # 32 px fills ~60% of a 1024-px image
         self.assertEqual(a.state.steps["pixelize"].info["grid"]["p"], 19.0)  # read back on that block size
+        self.assertEqual(a.state.steps["rebuild"].info["grade"], "soft")     # objects: the lighter grade
         items = self.ok(self.get(f"/api/assets?project={pid}"))["items"]
         self.assertEqual([i["kind"] for i in items if i["id"] == oid], ["object"])
         self.assertEqual(self.post("/api/expressions", {"project": pid, "id": oid})[0], 400)   # no face

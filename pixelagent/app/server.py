@@ -112,7 +112,8 @@ def overrides(s):
             "budget": {"monthly_usd": float(s["monthly_usd"]), "max_usd_per_asset": float(s.get("asset_usd", 3.0)),
                        "monthly_scope_dir": s["projects_dir"], "ledger": ledger_path()},
             "style": {"sprite_height": int(s["sprite_height"]), **LOOKS[s.get("look", "soft")]["style"]},
-            "finish": {**LOOKS[s.get("look", "soft")]["finish"], "grade": s.get("grade", "medium")}}
+            "finish": {**LOOKS[s.get("look", "soft")]["finish"], "grade": s.get("grade", "medium"),
+                       "prop_grade": s.get("prop_grade", "soft")}}
 
 
 # the app's two looks: soft = the game-sprite look (reduce finish, docs/FACE_ROOT_CAUSE.md), classic = strict palette
@@ -921,7 +922,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"projects": projects, "current": cur, "settings": {
                     "backend": s["backend"], "monthly_usd": s["monthly_usd"], "asset_usd": s.get("asset_usd", 3.0),
                     "sprite_height": s["sprite_height"], "projects_dir": s["projects_dir"], "key_found": key_found(),
-                    "look": s.get("look", "soft"), "grade": s.get("grade", "medium")},
+                    "look": s.get("look", "soft"), "grade": s.get("grade", "medium"),
+                    "prop_grade": s.get("prop_grade", "soft")},
                     "month_spent": round(spent, 2), "estimates": estimates(s),
                     "trash_count": len(trash(s).entries())})
             if u.path == "/api/assets":
@@ -1013,14 +1015,15 @@ class Handler(BaseHTTPRequestHandler):
                 os.startfile(path) if os.name == "nt" else subprocess.Popen(["xdg-open", path])
                 return self._json({"ok": True})
             if u.path == "/api/settings":
-                for k in ("backend", "monthly_usd", "asset_usd", "sprite_height", "projects_dir", "look", "grade"):
+                for k in ("backend", "monthly_usd", "asset_usd", "sprite_height", "projects_dir", "look", "grade", "prop_grade"):
                     if k in body and body[k] not in (None, ""):
                         s[k] = body[k]
                 if s["backend"] not in ("openai", "dry_run"):
                     raise ValueError("unknown backend")
                 if s.get("look", "soft") not in LOOKS:
                     raise ValueError("choose the soft or the classic look")
-                if s.get("grade", "medium") not in ("none", "soft", "medium", "strong"):
+                if s.get("grade", "medium") not in ("none", "soft", "medium", "strong") or \
+                        s.get("prop_grade", "soft") not in ("none", "soft", "medium", "strong"):
                     raise ValueError("choose a colour grade: none, soft, medium or strong")
                 try:
                     s["monthly_usd"] = float(s["monthly_usd"])

@@ -678,7 +678,8 @@ an animation-listing bug.
 - **Objects** (asset_type `prop`, the app's Objects library): the native finish for one item on a square image,
   with blocks sized for the item (`concept.object_block`). Its own prompt and critic note; fitted to its size
   when drawn more than 20% too big. First three (`bench_runs_objects`: sword, chest, potion; $0.87): clean pixel art;
-  the sword was drawn 82 px for 48 and fitted, losing some blade shading.
+  the sword was drawn 82 px for 48 and fitted, losing some blade shading. Objects use their own, lighter palette
+  grade (`[finish] prop_grade = "soft"`, the owner's pick: medium turned gold and potion reds dusty).
 
 ### Next: characters
 1. **A validation round for move sets and expressions** on several references, rated by the owner (one character

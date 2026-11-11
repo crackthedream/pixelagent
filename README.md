@@ -154,7 +154,9 @@ character pipeline with the native finish. The image model draws one item as pix
 blocks sized so the item fills about 60% of it; it is read back, rebuilt and graded like a character. Faces,
 animations and expressions do not apply. The size is the item's longest side (default `[style] prop_size = 48`).
 An item drawn more than 20% bigger is read again at its asked size; the image model draws long, thin items with
-far more pixels than asked. About $0.29 an object (two drafts without a reference).
+far more pixels than asked. Objects have their own palette grade (`[finish] prop_grade`, Settings > Object
+colours; Light by default, so gold and potion reds stay readable). About $0.29 an object (two drafts without a
+reference).
 
 ## Game pack
 `python -m pixelagent --project P pack CHARACTER` (or Save next to "Game pack" in the app's Exports card) writes

@@ -92,6 +92,7 @@ mode = "native"              # "native": the image model draws the character AS 
                              # rewrites + critic repairs; kept only for old projects and tests).
 grade = "medium"             # native finish palette grade: "none", "soft", "medium" or "strong" -- less saturated,
                              # lifted shadows, like Alice in Cradle's dusty colours; the face keeps its colours
+prop_grade = "soft"          # the same for objects and props: lighter, so gold and potion reds stay readable
 reduce_colors = 96           # colour budget of the reduce finish, shared by sqrt(area); eyes and mouth get >= 4
 max_usd = 1.5                # cap for the artist step per asset (upper bound; cached context is cheaper)
 max_turns = 40

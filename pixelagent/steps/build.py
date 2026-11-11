@@ -85,12 +85,23 @@ def grade_colours(rgb, chroma=0.65, lift=0.14, knee=0.6):
     return _from_oklab(lab)
 
 
-def grade_setting(ctx):
-    """The palette grade for this run: [finish] grade (default 'medium') in the native finish, none otherwise."""
+def grade_name(ctx):
+    """The palette grade's name for this asset: [finish] grade for characters (default 'medium'), [finish] prop_grade
+    for objects (default 'soft': loot stays readable -- gold and potion reds turned dusty under medium; the owner's
+    pick, 2026-11-11). 'none' outside the native finish."""
     if finish_mode(ctx) != "native":
-        return None
-    name = str(ctx.cfg.get("finish", {}).get("grade", "medium"))
-    return GRADES.get(name, GRADES["medium"])
+        return "none"
+    f = ctx.cfg.get("finish", {})
+    if ctx.spec().asset_type == "prop":
+        name = str(f.get("prop_grade", "soft"))
+    else:
+        name = str(f.get("grade", "medium"))
+    return name if name in GRADES else "medium"
+
+
+def grade_setting(ctx):
+    """The palette grade settings for this run (build.GRADES), or None."""
+    return GRADES.get(grade_name(ctx))
 
 
 def _kmeans(x, k, iters=12):
@@ -203,7 +214,7 @@ def soft_reduce(ctx):
     ctx.save_project("project", doc)
     ctx.save_image("preview", "rebuild.png", imaging.from_bytes(w, h, doc.composite()))
     ctx.info.update(mode=finish_mode(ctx), colors=len(palette), colors_per_material=counts, specks_merged=merged,
-                    grade=str(ctx.cfg.get("finish", {}).get("grade", "medium")) if grade else "none")
+                    grade=grade_name(ctx) if grade else "none")
 
 
 def rebuild(ctx):
