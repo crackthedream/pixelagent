@@ -365,3 +365,17 @@ drawn strands, each eye a distinct pixel shape. The reduce finish gives a soft b
   - **Size fix:** it now only SHRINKS frames drawn too big (up to 1.4x), measured on the taller, upright half of
     the frames. Shorter readings are the pose itself: a run's tallest frames still lean, and enlarging them by 11%
     made the runner bigger than the character.
+
+**Expressions** (2026-11-11, `pixelagent/expressions.py`, the app's Expressions card; `bench_runs_moves2/ref05`):
+- **Method:** a masked edit of the pixel-art concept over the face only, read back on the character's own block
+  grid, then pasted into the finished sprite inside the face box and inside the figure. Pixels the edit did not
+  touch are kept exactly. Each face comes as a whole sprite and as a face patch with its box.
+- **Finding the face:** the material labels can't do it. Only ref05 of the ten has an eye material, and "skin" is
+  labelled on hands, a plush toy and lit hair; `face_layout` also misplaced 4 of 9. The vision model
+  (`vision_pick`) on the large concept found all nine correctly for $0.013 in all.
+- **Colours:** each drawn colour is graded like the character, then snapped to the sprite's own colour when one is
+  within 0.03 OKLab. Otherwise its graded hue is kept. Snapping everything (and a looser 0.045) turned the happy
+  face's pink tongue into skin and its purple lash arcs into the costume's blue.
+- **First set** (ref05, six faces, $0.327, ~4 min): happy, sad, angry, surprised, hurt and blink all read clearly
+  as pixel-art faces; 135-207 pixels changed each, hair and outline untouched. The redrawn faces are simpler and
+  more frontal than the original three-quarter face.

@@ -500,3 +500,8 @@ p.small { font-size: 11px; margin: 8px 0 0; }
   background: color-mix(in srgb, var(--accent) 14%, transparent);
   outline: 1px solid rgba(255, 255, 255, 0.85); outline-offset: 0;
   box-shadow: 0 0 0 100vmax rgba(0, 0, 0, 0.22); }
+
+.expr-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 10px; }
+.expr { margin: 0; }
+.expr .stage { display: grid; place-items: center; aspect-ratio: 1; border-radius: var(--r-control); overflow: hidden; }
+.expr figcaption { font-size: 12px; margin-top: 4px; display: flex; gap: 6px; flex-wrap: wrap; }

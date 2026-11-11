@@ -300,6 +300,20 @@ class AppServerTest(unittest.TestCase):
         self.assertEqual(sorted(self.asset(pid, cid)["animations"]), sorted(ids))
         self.assertEqual(self.post("/api/movesets", {"project": pid, "character": ids[0]})[0], 400)  # not for an animation
 
+    def test_expressions_change_only_the_face(self):
+        pid = self.new_project("Faces")
+        cid = self.ok(self.post("/api/characters", {"project": pid, "prompt": "a small knight"}))["id"]
+        self.assertEqual(self.drive(pid, cid)["status"], "complete")
+        self.assertEqual(self.post("/api/expressions", {"project": pid, "id": cid, "names": ["smug"]})[0], 400)
+        self.ok(self.post("/api/expressions", {"project": pid, "id": cid, "names": ["happy", "blink"]}))
+        d = self.wait_idle(pid, cid)
+        self.assertEqual([e["name"] for e in d.get("expressions", [])], ["happy", "blink"], d.get("error"))
+        x0, y0, x1, y1 = d["face_box"]
+        self.assertTrue(0 <= x0 < x1 and 0 <= y0 < y1)
+        status, png = self.get(d["expressions"][0]["face"])
+        self.assertEqual((status, png[1:4]), (200, b"PNG"))
+        self.assertIn("expression", self.ok(self.get("/api/overview"))["estimates"])
+
     def test_rename_duplicate_and_delete_items(self):
         pid = self.new_project("Manage")
         proj = Project(os.path.join(self.projects, pid))

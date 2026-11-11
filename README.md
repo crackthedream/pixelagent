@@ -137,6 +137,17 @@ An animation is its own asset, linked to a finished character. Steps:
 First real run (Mushroom Traveler, 96 px, 6-frame walk): plan + pose sheet $0.07, drawing $1.46 (upper bound,
 69 rounds); identical 25-colour palette in all frames, opaque-area spread 3.3 %.
 
+With the pixel-art (Soft) look there is no drawing step: the pose sheet is drawn as pixel art on a layout of the
+finished sprite and each frame is read back from it (~$0.07 an animation). **Move set** (the app's button, or
+`benchmarks/move_set.py`): idle, walk, run, jump, attack and hurt at once, each its own animation (~$0.40 in all).
+
+## Expressions
+A finished pixel-art character gets other faces (happy, sad, angry, surprised, hurt, blink): the vision model finds
+the face, the image model redraws only that area of the pixel-art concept, which is read back on the character's
+own grid and graded like it. Only the face changes, pixel for pixel; each comes as a whole sprite and as a face patch
+with its box (`expressions/expressions.json`) for games that swap faces. About $0.055 a face. In the app: the
+character's Expressions card; in code: `pixelagent.expressions.make(project, id, names)`.
+
 ## Files
 ```
 config.toml            engine path, backend mode, model per role, budgets, style guide

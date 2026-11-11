@@ -410,6 +410,14 @@ function inspector(d) {
       <div class="row-actions" style="margin-top:8px"><button class="btn" id="btn-new-anim">${icon("plus")}New animation</button>
         <button class="btn" id="btn-move-set">${icon("plus")}Move set</button></div></div>`;
   }
+  if (d.kind !== "animation" && d.status === "complete") {
+    const ex = d.expressions || [];
+    html += `<div class="card"><h2>Expressions</h2>
+      ${ex.length ? `<div class="expr-grid">${ex.map((e) => `<figure class="expr"><a class="stage" href="${esc(e.x4)}" target="_blank" rel="noopener" title="Open the whole sprite at 4×">${stageImg(e.face, e.name)}</a>
+        <figcaption>${esc(e.name)} <a href="${esc(e.url)}" download>PNG</a> <a href="${esc(e.face)}" download>Face</a></figcaption></figure>`).join("")}</div>`
+        : `<p class="muted" style="margin:0 0 10px">The same sprite with another face: happy, sad, angry and more. Only the face changes, so a game can swap the face alone.</p>`}
+      <button class="btn" id="btn-expr" style="margin-top:8px">${icon("plus")}${ex.length ? "Make more" : "Make expressions"}</button></div>`;
+  }
   if (d.log.length) {
     html += `<div class="card"><details><summary>Activity</summary><div class="log">${esc(d.log.join("\n"))}</div></details></div>`;
   }
@@ -524,6 +532,7 @@ function wireDetail(d) {
   on("#btn-folder", () => act(() => api("/api/open", { project: p, id: d.id, what: "folder" })));
   on("#btn-new-anim", () => sheetNewAnimation(d));
   on("#btn-move-set", () => sheetMoveSet(d));
+  on("#btn-expr", () => sheetExpressions(d));
   on("#btn-more", (e) => openMenu(e.currentTarget, itemMenu(d)));
   document.querySelectorAll("[data-version]").forEach((b) => b.onclick = () => {
     const v = Number(b.dataset.version);
@@ -748,6 +757,32 @@ function sheetNewAnimation(d) {
       const r = await act(() => api("/api/animations", { project: project(), character: d.id, prompt,
         name: $("#na-name").value.trim(), frames: segmentedValue($("#na-f")) || null }), "Planning the animation");
       if (r) { closeSheet(); location.hash = `#/item/${encodeURIComponent(r.id)}`; }
+    };
+  });
+}
+
+function sheetExpressions(d) {
+  const names = [["happy", "Happy"], ["sad", "Sad"], ["angry", "Angry"], ["surprised", "Surprised"], ["hurt", "Hurt"], ["blink", "Blink"]];
+  const have = new Set((d.expressions || []).map((e) => e.name));
+  openSheet(`<h2>Expressions</h2><p class="sub">New faces for ${esc(d.name)}. Only the face is redrawn; the rest of the sprite stays pixel for pixel. Making one again replaces it.</p>
+    <div class="field"><span class="label">Faces</span><div class="chips" id="ex-names">${names.map(([v, l]) =>
+      `<button class="chip" data-v="${v}" aria-pressed="${!have.has(v)}">${l}</button>`).join("")}</div></div>
+    <div class="actions"><span class="estimate" id="ex-est"></span><button class="btn" data-close>Cancel</button><button class="btn primary" id="ex-go">Make expressions</button></div>`, (s) => {
+    const picked = () => [...s.querySelectorAll("#ex-names .chip[aria-pressed=true]")];
+    const est = () => {
+      const p = picked();
+      $("#ex-est").textContent = p.length ? estimateText(p.length * (state.overview.estimates.expression || 0.06)) : "Pick at least one face";
+      $("#ex-go").disabled = !p.length;
+    };
+    s.querySelectorAll("#ex-names .chip").forEach((b) => b.onclick = () => {
+      b.setAttribute("aria-pressed", b.getAttribute("aria-pressed") === "true" ? "false" : "true"); est();
+    });
+    est();
+    s.querySelector("[data-close]").onclick = closeSheet;
+    $("#ex-go").onclick = async () => {
+      const r = await act(() => api("/api/expressions", { project: project(), id: d.id, names: picked().map((b) => b.dataset.v) }),
+        "Drawing the expressions");
+      if (r) closeSheet();
     };
   });
 }

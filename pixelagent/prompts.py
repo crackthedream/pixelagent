@@ -91,6 +91,17 @@ REVISE_CONCEPT = """Edit this character concept. Change requested: {note}
 {scope}Keep everything else exactly as it is: the same character, pose, proportions, framing, colours, style and
 background. The result must look like the same illustration with only the requested change."""
 
+LOCATE_FACE = """This is a pixel-art game character shown enlarged. Give the tight box around its FACE FEATURES: both
+eyes, the brows and the mouth (not the whole head, not the hair), as fractions 0-1 of the image width and height.
+found=false when the face cannot be seen."""
+
+# an expression of a finished pixel-art character: a masked edit of its pixel-art concept, the face only
+EXPRESSION = """Edit this pixel-art character sprite: change ONLY the facial expression, inside the transparent area of
+the mask, to {expression}. It is hand-pixelled art shown enlarged: keep exactly the same block size and grid, crisp
+square blocks (no smoothing, no blur, no new detail finer than one block), the same palette, the same face shape,
+skin and hair. Draw the eyes, brows and mouth as a few designed pixels in the same style as the original face --
+vivid and simple, like a pixel-art game character's expression. Everything else stays exactly as it is."""
+
 REFINE_CONCEPT = """Refine this concept for pixel-art conversion without changing the design: keep identity, pose,
 colours and proportions; simplify noisy detail into large clear shapes, make the silhouette crisp, keep the
 plain flat light-grey background and the single soft light from the {light}."""

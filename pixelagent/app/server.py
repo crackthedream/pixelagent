@@ -144,7 +144,7 @@ def estimates(settings=None):
     # revisions: one concept edit + material map + critique (~$0.12)
     character = NATIVE_CHARACTER if mode == "native" else REDUCE_CHARACTER
     return ({**ESTIMATES, "character": character, "animation_base": 0.15, "animation_per_frame": 0.0,
-             "revise_area": 0.15, "revise_whole": 0.15}
+             "revise_area": 0.15, "revise_whole": 0.15, "expression": 0.06}
             if mode in ("reduce", "native") else ESTIMATES)
 
 
@@ -391,6 +391,15 @@ def asset_detail(settings, pid, proj, aid):
     if d["kind"] != "animation":
         # by the recorded parent, not the id prefix ("knight-2-walk" is not an animation of "knight")
         d["animations"] = [x for x in proj.asset_ids() if x != aid and proj.asset(x).state.inputs.get("character") == aid]
+        ej = os.path.join(a.dir, "expressions", "expressions.json")
+        if os.path.exists(ej):
+            with open(ej, encoding="utf-8") as f:
+                ex = json.load(f)
+            d["expressions"] = [{"name": n, "url": file_url(pid, a, "expressions/" + e["png"]),
+                                 "x4": file_url(pid, a, "expressions/" + e["png_x4"]),
+                                 "face": file_url(pid, a, "expressions/" + e["face"])}
+                                for n, e in ex.get("expressions", {}).items()]
+            d["face_box"] = ex.get("face_box")
     return d
 
 
@@ -476,6 +485,25 @@ MOVES = {
     "attack": ("5-frame attack, plays once, side view facing right: wind up, strike, follow through, recover", 5),
     "hurt": ("3-frame hurt reaction, plays once: flinch and recoil backwards, then recover", 3),
 }
+
+
+def make_expressions(settings, body):
+    """Expressions for a finished character (pixel-art look): one masked face edit each, in the background."""
+    from .. import expressions
+    pid, aid = body["project"], body["id"]
+    names = body.get("names") or list(expressions.EXPRESSIONS)
+    unknown = [n for n in names if n not in expressions.EXPRESSIONS]
+    if unknown:
+        raise ValueError(f"unknown expression: {', '.join(map(str, unknown))}")
+    spend_check(settings, pid, aid)
+    proj = Project(project_path(settings, pid), overrides(settings))
+    a = proj.asset(aid)
+    if a.state.inputs.get("kind") == "animation" or a.state.status != "complete":
+        raise ValueError("expressions are made for a finished character")
+    if proj.config.get("finish", {}).get("mode") != "native":
+        raise ValueError("expressions need the Soft look (pixel-art characters)")
+    JOBS.start((pid, aid), lambda log: expressions.make(proj, aid, names, log=log))
+    return {"ok": True, "names": names}
 
 
 def create_move_set(settings, body):
@@ -913,6 +941,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(create_animation(s, body))
             if u.path == "/api/movesets":
                 return self._json(create_move_set(s, body))
+            if u.path == "/api/expressions":
+                return self._json(make_expressions(s, body))
             if u.path == "/api/decide":
                 return self._json(decide(s, body))
             if u.path == "/api/run":
