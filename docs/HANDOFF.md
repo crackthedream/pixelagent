@@ -714,7 +714,8 @@ app sheet ("New object", "New background") and benchmark.
    character steps; the work is object-aware material labels, the size rules,
    skipping the face pass and animation, and an "item sheet" export. Done when three benchmark props (for
    example a weapon, a chest, a potion) export cleanly from a prompt.
-8. **Backgrounds/scenes:** a new pipeline (layout plan → per-layer concepts → per-layer conversion → targeted
+8. **Backgrounds/scenes:** design in `docs/BACKGROUNDS_DESIGN.md` (a scenery backdrop and a theme kit, after how
+   Alice in Cradle assembles stages from chip sets). Originally sketched as a new pipeline (layout plan → per-layer concepts → per-layer conversion → targeted
    artist passes → seam and layer checks → layered export). Start with a short design doc and 3 benchmark
    prompts (forest, town street, cave) before code.
 9. **Tiles and tilesets:** a subset of backgrounds: seamless edges (wrap-around lint), autotile variants (corners
