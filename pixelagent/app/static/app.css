@@ -505,3 +505,5 @@ p.small { font-size: 11px; margin: 8px 0 0; }
 .expr { margin: 0; }
 .expr .stage { display: grid; place-items: center; aspect-ratio: 1; border-radius: var(--r-control); overflow: hidden; }
 .expr figcaption { font-size: 12px; margin-top: 4px; display: flex; gap: 6px; flex-wrap: wrap; }
+
+.px-wide { image-rendering: pixelated; image-rendering: crisp-edges; }

@@ -1,7 +1,7 @@
 """The ordered pipeline. Each step module exposes run(ctx) (and optionally after_gate(ctx, decision))."""
 from ..pipeline import Step
-from . import (anim, artist_step, build, concept, critique, detail, export, intake, later, materials, matmap, pixelize,
-               scene)
+from . import (anim, artist_step, build, concept, critique, detail, export, intake, kit, later, materials, matmap,
+               pixelize, scene)
 
 STEPS = [
     Step(1, "intake", intake.run, gate="A", gate_title="confirm or edit the spec"),
@@ -41,4 +41,14 @@ SCENE_STEPS = [
     Step(5, "scene_review", scene.review, gate="S", gate_title="approve the backdrop (reject with a note to redraw)",
          redo_from="scene_layers"),
     Step(6, "scene_export", scene.export),
+]
+
+# A walkable kit: tiles and decorations painted as one terrain chunk and sliced (docs/BACKGROUNDS_DESIGN.md).
+KIT_STEPS = [
+    Step(1, "kit_plan", kit.plan),
+    Step(2, "kit_sheet", kit.sheet),
+    Step(3, "kit_read", kit.read),
+    Step(4, "kit_review", kit.review, gate="K", gate_title="approve the kit's test level (reject with a note to repaint)",
+         redo_from="kit_sheet"),
+    Step(5, "kit_export", kit.export),
 ]

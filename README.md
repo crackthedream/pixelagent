@@ -176,6 +176,15 @@ with the project's first character standing in front, waits for approval (gate S
 a Godot ParallaxBackground scene, a Tiled map with parallax image layers, a Unity parallax script and a README.
 About $0.25 a scene. Design and measurements: `docs/BACKGROUNDS_DESIGN.md`.
 
+## Kits (walkable tiles)
+A kit is its own asset (the app's Kits library and New kit), and it can match a finished scene. The image model
+paints a terrain chunk over a layout image: a 6x4-tile ground block and a 4x1 platform at exact positions, with the
+decorations beside them. The chunk is read as pixel art with one palette and sliced into 28 32-px tiles by role:
+corners, edges, top, fill and bottom variants, and platform pieces. Repeating tiles wrap onto themselves. A test
+level in front of the scene, with the character standing on it, waits for approval (gate K). Export: tileset PNG,
+Tiled .tsx and a test .tmx, decorations (PNGs, an atlas, a Tiled image collection), a Godot 4 TileSet with
+collision and one-way platforms, and a README with Unity and LDtk steps. About $0.06 a kit.
+
 ## Game pack
 `python -m pixelagent --project P pack CHARACTER` (or Save next to "Game pack" in the app's Exports card) writes
 `assets/CHARACTER/game_pack/` and a zip of it. It holds one atlas with uniform cells, where the standing sprite,

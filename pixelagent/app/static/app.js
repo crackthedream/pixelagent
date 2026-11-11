@@ -63,7 +63,7 @@ async function loadItems() {
   state.items = (await api(`/api/assets?project=${encodeURIComponent(project())}`)).items;
   // same rule as the "Needs you" filter: waiting at a gate, paused, or stopped
   const wait = (k) => state.items.filter((i) => i.kind === k && !i.running && (i.gate || i.paused || i.failed)).length;
-  for (const [k, id] of [["character", "badge-characters"], ["object", "badge-objects"], ["scene", "badge-scenes"], ["animation", "badge-animations"]]) {
+  for (const [k, id] of [["character", "badge-characters"], ["object", "badge-objects"], ["scene", "badge-scenes"], ["kit", "badge-kits"], ["animation", "badge-animations"]]) {
     const n = wait(k);
     const b = $("#" + id);
     b.hidden = !n;
@@ -160,7 +160,7 @@ async function render(fromRefresh) {
   if (r.view === "item" && r.id) return renderDetail(r.id, fromRefresh);
   if (!fromRefresh) await loadItems();
   sessionStorage.setItem("from", r.view);
-  return renderLibrary({ animations: "animation", objects: "object", scenes: "scene" }[r.view] || "character");
+  return renderLibrary({ animations: "animation", objects: "object", scenes: "scene", kits: "kit" }[r.view] || "character");
 }
 
 function setToolbar(html) {
@@ -205,7 +205,7 @@ window.fitPixel = fitPixel;
 window.addEventListener("resize", () => document.querySelectorAll("img.px").forEach((i) => fitPixel(i)));
 
 function renderLibrary(kind) {
-  const plural = { animation: "Animations", object: "Objects", scene: "Scenes" }[kind] || "Characters";
+  const plural = { animation: "Animations", object: "Objects", scene: "Scenes", kit: "Kits" }[kind] || "Characters";
   const filter = sessionStorage.getItem("filter-" + kind) || "all";
   setToolbar(`
     <div class="title">${esc(project())}</div><div class="spacer"></div>
@@ -215,12 +215,14 @@ function renderLibrary(kind) {
     </div>
     ${kind === "character" ? `<button class="btn primary round" id="btn-new">${icon("plus")}New character</button>`
       : kind === "scene" ? `<button class="btn primary round" id="btn-new">${icon("plus")}New scene</button>`
+      : kind === "kit" ? `<button class="btn primary round" id="btn-new">${icon("plus")}New kit</button>`
       : kind === "object" ? `${state.items.some((i) => i.kind === "object" && i.status === "complete")
         ? `<button class="btn round" id="btn-sheet" title="Every finished object in one atlas, for a game engine">${icon("export")}Item sheet</button>` : ""}
         <button class="btn primary round" id="btn-new">${icon("plus")}New object</button>` : ""}`);
   document.querySelectorAll("[data-filter]").forEach((b) => b.onclick = () => { sessionStorage.setItem("filter-" + kind, b.dataset.filter); render(); });
   const nb = $("#btn-new");
-  if (nb) nb.onclick = () => (kind === "object" ? sheetNewObject() : kind === "scene" ? sheetNewScene() : sheetNewCharacter());
+  if (nb) nb.onclick = () => (kind === "object" ? sheetNewObject() : kind === "scene" ? sheetNewScene()
+    : kind === "kit" ? sheetNewKit() : sheetNewCharacter());
   const sb = $("#btn-sheet");
   if (sb) sb.onclick = async () => {
     const r = await act(() => api("/api/itemsheet", { project: project() }));
@@ -239,7 +241,10 @@ function renderLibrary(kind) {
 
   const c = $("#content");
   if (!all) {
-    c.innerHTML = kind === "scene" ? emptyState("mountain", "No scenes yet",
+    c.innerHTML = kind === "kit" ? emptyState("grid", "No kits yet",
+      "Describe the ground of a place: tiles to walk on, a platform and decorations, in pixel art that fits your scene.",
+      `<button class="btn primary lg round" id="empty-new">${icon("plus")}New kit</button>`)
+      : kind === "scene" ? emptyState("mountain", "No scenes yet",
       "Describe a place: a forest at dusk, a town street, a crystal cave. It becomes parallax layers in pixel art at your characters' scale.",
       `<button class="btn primary lg round" id="empty-new">${icon("plus")}New scene</button>`)
       : kind === "object" ? emptyState("box", "No objects yet",
@@ -250,7 +255,8 @@ function renderLibrary(kind) {
       `<button class="btn primary lg round" id="empty-new">${icon("plus")}New character</button>`)
       : emptyState("film", "No animations yet", "Open a finished character and choose New animation. Describe the motion in your own words.", "");
     const en = $("#empty-new");
-    if (en) en.onclick = () => (kind === "object" ? sheetNewObject() : kind === "scene" ? sheetNewScene() : sheetNewCharacter());
+    if (en) en.onclick = () => (kind === "object" ? sheetNewObject() : kind === "scene" ? sheetNewScene()
+      : kind === "kit" ? sheetNewKit() : sheetNewCharacter());
     return;
   }
   c.innerHTML = `${spendBanner()}
@@ -298,10 +304,10 @@ async function renderDetail(id, fromRefresh) {
   state.detailSig = sig;
   if (d.live) await new Promise((res) => { const im = new Image(); im.onload = im.onerror = res; im.src = d.live.url; });
 
-  const from = { animation: "animations", object: "objects", scene: "scenes" }[d.kind] || "characters";
+  const from = { animation: "animations", object: "objects", scene: "scenes", kit: "kits" }[d.kind] || "characters";
   sessionStorage.setItem("from", from);
   renderSidebar();
-  const backLabel = { animation: "Animations", object: "Objects", scene: "Scenes" }[d.kind] || "Characters";
+  const backLabel = { animation: "Animations", object: "Objects", scene: "Scenes", kit: "Kits" }[d.kind] || "Characters";
   setToolbar(`<div class="title">${esc(d.name)}</div><div class="spacer"></div>
     ${d.failed || d.job_error ? `<button class="btn" id="btn-retry">${icon("retry")}Try again</button>` : ""}
     ${d.exports ? `<button class="btn" id="btn-folder">${icon("folder")}Show in folder</button>
@@ -312,7 +318,7 @@ async function renderDetail(id, fromRefresh) {
   const viewing = !d.running && state.viewVersion !== null
     ? (d.versions.items.find((v) => v.version === state.viewVersion && !v.current) || null) : null;
   const heroUrl = viewing ? viewing.url
-    : (d.kind === "animation" && gd && (gd.id === "R" || gd.id === "P")) || (d.kind === "scene" && gd && gd.id === "S") ? gd.image
+    : (d.kind === "animation" && gd && (gd.id === "R" || gd.id === "P")) || (d.kind === "scene" && gd && gd.id === "S") || (d.kind === "kit" && gd && gd.id === "K") ? gd.image
     : gd && gd.candidates && state.pick !== null && gd.candidates[state.pick] ? gd.candidates[state.pick]
     : d.live ? d.live.url : d.hero;
   $("#content").innerHTML = `${spendBanner()}
@@ -506,6 +512,14 @@ function decisionPanel(d) {
       ${noteRow("Not right? For example: longer strides", "New poses")}
       <div class="decision-actions"><div class="spacer"></div><button class="btn primary lg" id="btn-approve">Approve and draw frames</button></div></div>`;
   }
+  if (g.kind === "kit") {
+    return `<div class="decision">${head("Approve the kit", "A small test level built from its tiles, in front of the matching scene. The tiles and decorations are below.")}
+      <img class="wide-img px-wide" src="${esc(g.tileset)}" alt="Tileset">
+      <div class="expr-grid">${(g.decorations || []).map((x) => `<figure class="expr"><span class="stage">${stageImg(x.url, x.name)}</span><figcaption>${esc(x.name)}</figcaption></figure>`).join("")}</div>
+      ${g.named ? "" : `<p class="muted small">The decorations did not match the plan one to one, so they are numbered instead of named.</p>`}
+      ${noteRow("What should change? For example: grassier top edge, smaller rocks", "Repaint kit")}
+      <div class="decision-actions"><div class="spacer"></div><button class="btn primary lg" id="btn-approve">Approve and export</button></div></div>`;
+  }
   if (g.kind === "scene") {
     const seams = (g.seams || []).filter((s) => s.visible).map((s) => s.layer);
     return `<div class="decision">${head("Approve the backdrop", "It scrolls above as a game camera would see it; each layer is shown below, far to near.")}
@@ -694,6 +708,28 @@ function sheetNewProject() {
     };
     $("#pc").onclick = go;
     $("#pn").onkeydown = (e) => { if (e.key === "Enter") go(); };
+  });
+}
+
+function sheetNewKit() {
+  const scenes = state.items.filter((i) => i.kind === "scene" && i.status === "complete");
+  openSheet(`<h2>New kit</h2><p class="sub">Tiles to walk on (32 px), a floating platform and decorations, painted as one piece of ground and cut into tiles. You'll approve it as a small test level.</p>
+    <div class="stack">
+      <div class="field"><label for="nk-prompt">The ground</label>
+        <textarea class="textarea" id="nk-prompt" placeholder="Mossy forest ground with roots and stones; a fallen-log platform; ferns, mushrooms, a mossy rock, a wooden signpost."></textarea></div>
+      <div class="row-2"><div class="field"><label for="nk-name">Name</label><input class="input" id="nk-name" placeholder="Optional"></div>
+        <div class="field"><label for="nk-scene">Matches the scene</label>
+          <select class="input" id="nk-scene"><option value="">None</option>${scenes.map((x) => `<option value="${esc(x.id)}">${esc(x.name)}</option>`).join("")}</select></div></div>
+    </div>
+    <div class="actions"><span class="estimate" id="nk-est"></span><button class="btn" data-close>Cancel</button><button class="btn primary" id="nk-go">Create kit</button></div>`, (s) => {
+    $("#nk-est").textContent = estimateText(state.overview.estimates.kit || 0.10);
+    s.querySelector("[data-close]").onclick = closeSheet;
+    $("#nk-go").onclick = async () => {
+      const prompt = $("#nk-prompt").value.trim();
+      if (!prompt) return toast("Describe the ground first", true);
+      const r = await act(() => api("/api/kits", { project: project(), prompt, name: $("#nk-name").value.trim(), scene: $("#nk-scene").value || null }), "Planning your kit");
+      if (r) { closeSheet(); location.hash = `#/item/${encodeURIComponent(r.id)}`; }
+    };
   });
 }
 
@@ -1117,7 +1153,7 @@ function alertDeleteItem(it) {
     onConfirm: async () => {
       const r = await act(() => api("/api/item/delete", { project: project(), id: it.id, with_animations: anims.length > 0 }),
         "Moved to Recently Deleted");
-      if (r && route().view === "item") location.hash = `#/${{ animation: "animations", object: "objects", scene: "scenes" }[it.kind] || "characters"}`;
+      if (r && route().view === "item") location.hash = `#/${{ animation: "animations", object: "objects", scene: "scenes", kit: "kits" }[it.kind] || "characters"}`;
     },
   });
 }
@@ -1147,7 +1183,7 @@ function deletedWhen(t) {
 function deletedLabel(e) {
   if (e.kind === "project") return `Project, ${e.items || 0} item${e.items === 1 ? "" : "s"}`;
   const what = e.item_kind === "animation" ? `Animation${e.character_name ? ` of ${e.character_name}` : ""}`
-    : { object: "Object", scene: "Scene" }[e.item_kind] || "Character";
+    : { object: "Object", scene: "Scene", kit: "Kit" }[e.item_kind] || "Character";
   const anims = e.animations ? ` and ${e.animations} animation${e.animations === 1 ? "" : "s"}` : "";
   return `${what}${anims}, in ${e.project}`;
 }

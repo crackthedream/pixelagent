@@ -402,6 +402,24 @@ class AppServerTest(unittest.TestCase):
         self.assertEqual(self.post("/api/expressions", {"project": pid, "id": sid})[0], 400)
         self.assertIn("scene", self.ok(self.get("/api/overview"))["estimates"])
 
+    def test_kits_match_a_scene_and_stop_for_a_test_level(self):
+        pid = self.new_project("Ground")
+        sid = self.ok(self.post("/api/scenes", {"project": pid, "prompt": "a forest at dusk"}))["id"]
+        self.assertEqual(self.drive(pid, sid)["status"], "complete")
+        self.assertEqual(self.post("/api/kits", {"project": pid, "prompt": "forest ground", "scene": "nope"})[0], 400)
+        kid = self.ok(self.post("/api/kits", {"project": pid, "prompt": "forest ground", "scene": sid}))["id"]
+        d = self.wait_idle(pid, kid)
+        g = d["gate_detail"]
+        self.assertEqual((d["kind"], g["kind"]), ("kit", "kit"))
+        self.assertTrue(g["image"] and g["tileset"])
+        self.assertEqual(len(g["decorations"]), 6)
+        d = self.drive(pid, kid)
+        self.assertEqual(d["status"], "complete")
+        labels = {e["key"]: e["label"] for e in d["exports"]}
+        self.assertEqual(labels["godot"], "Godot TileSet (.tres)")
+        self.assertEqual(labels["tiled_level"], "Tiled test level (.tmx)")
+        self.assertIn("kit", self.ok(self.get("/api/overview"))["estimates"])
+
     def test_rename_duplicate_and_delete_items(self):
         pid = self.new_project("Manage")
         proj = Project(os.path.join(self.projects, pid))

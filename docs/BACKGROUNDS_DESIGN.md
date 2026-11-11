@@ -170,3 +170,30 @@ Next step: build the backdrop (section 3A) on these three results.
   - near layers sometimes have flat-topped trunks (the "keep to the edges" rule cuts them);
   - a pale rock slab in the cave looks washed out;
   - the preview's character stands at a fixed height, not on the scene's ground.
+
+## 9. The walkable kit, built (2026-11-11, `pixelagent/steps/kit.py`, `bench_runs_scenes/*kit`)
+
+- **Steps:** plan → sheet → read → gate K (a test level in front of the matching scene, with the character standing
+  on it) → export.
+- **A terrain chunk, not loose tiles.** The image model edits a layout image: a grey 6x4-tile ground block and a
+  4x1 platform at exact positions (4 image pixels per pixel). It paints them as one piece of ground and draws the
+  decorations in the empty right side. The chunk is read as pixel art, with one 48-colour palette for the whole kit
+  and the characters' grade, then sliced into 28 tiles by role: corners, edges, top, fill and bottom variants, and
+  the platform's ends and middles.
+- **Repeating tiles** (middles, and fill downwards) get the scene's ordered-dither self-wrap, so any can sit next
+  to any.
+- **Exports:** tileset PNG, Tiled `.tsx` (roles as tile properties) and a test-level `.tmx`, decorations as PNGs,
+  an atlas, and a Tiled image collection, a Godot 4 TileSet `.tres` (solid tiles full-square, platform tiles a
+  one-way top edge), and a README with Unity and LDtk steps. No LDtk project file is written yet.
+- **Results:** forest, street and cave kits matched to the three scenes, about $0.06 each ($0.17 in all).
+  - **Forest:** mossy ground with roots and stones, a fallen-log platform, ten decorations.
+  - **Street:** cobblestone blocks with a curb, a lamp post and a barrel.
+  - **Cave:** dark rock with crystal shards and clusters, a stone ledge.
+
+  The tiles join without visible seams in the test levels, and their tones match the scenes behind.
+- **Known limits:**
+  - When the model draws a different number of decorations than planned (10 against the forest's plan), they are
+    numbered rather than named.
+  - The test level places only three decorations.
+  - The preview repeats each scene layer at its own width (the first version tiled the flattened scene and jumped
+    at 810 px).

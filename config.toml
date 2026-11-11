@@ -58,6 +58,11 @@ seam_blend = 32              # columns dithered from the layer's continuation in
 sky_blend = 96               # the same for the sky (no detail to ghost, so a wider, gentler blend)
 seam_limit = 30.0            # a cut whose ends still differ more than this is flagged (the blend may show a ghost)
 
+[kit]
+quality = "medium"           # image quality for the kit sheet
+colours = 48                 # one palette for the whole kit (tiles and decorations)
+tile_blend = 8               # columns/rows dithered in so repeating tiles wrap onto themselves
+
 [concept]
 refine_after_pick = false    # true: after gate B, polish the picked draft with images.edit on image_final
 heads_range = [4.0, 5.0]     # soft look: a concept whose reduced figure is outside this many heads tall is redone

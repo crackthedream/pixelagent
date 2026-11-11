@@ -144,6 +144,26 @@ the layer's shapes stand alone and are fully opaque. It must REPEAT sideways: le
 left and the right edge (no tree, house or object touches the sides); only a ground strip along the bottom may run
 from edge to edge, as an even, repeating texture."""
 
+# walkable kits (pixelagent/steps/kit.py)
+KIT_PLAN = """Plan a walkable tile kit for a 2D side-scrolling pixel-art action game (the look of modern hand-made
+pixel-art platformers such as Alice in Cradle) from the request below: the ground's top surface (what you walk on)
+and its fill (what it is made of inside), a floating one-way platform, a palette and light (keep the scene's if one
+is given), and 6-10 decorations that stand on the ground (plants, rocks, props of the place), each with a short
+description and a size of 1-3 tiles of 32 pixels wide and high. A light, slightly muted palette."""
+
+KIT_SHEET = """This is a layout for a 2D side-scrolling pixel-art game tileset ({theme}). Paint it as authentic
+hand-pixelled game art with very small, crisp pixels, clean flat tone clusters, no gradients, no blur, no text.
+Palette: {palette}. Light: {light}.
+- The large grey block at the bottom left becomes one solid piece of ground: {surface} along its whole top edge
+  (it may poke a few pixels above it), {fill} inside, and finished left, right and bottom edges. Keep its exact
+  shape and position, and paint the inside as an even texture with no big single features, so it can be cut into
+  repeating 32-pixel tiles.
+- The thin grey bar at the top left becomes a floating one-way platform: {platform}. Keep its shape and position.
+- In the empty area on the right, draw these decorations, each standing alone on its own invisible ground line with
+  clear transparent space around it (they must not touch each other):
+{decorations}
+Everything else stays fully transparent: no sky, no background, no shadows on the background."""
+
 # an expression of a finished pixel-art character: a masked edit of its pixel-art concept, the face only
 EXPRESSION = """Edit this pixel-art character sprite: change ONLY the facial expression, inside the transparent area of
 the mask, to {expression}. It is hand-pixelled art shown enlarged: keep exactly the same block size and grid, crisp

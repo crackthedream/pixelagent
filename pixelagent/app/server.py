@@ -37,7 +37,7 @@ STEP_LABELS = {
     "export": "Export", "anim_plan": "Plan", "anim_poses": "Poses", "anim_traces": "Frame traces",
     "anim_draw": "Drawing frames", "anim_review": "Your approval", "anim_export": "Export",
 }
-GATE_KIND = {"A": "spec", "B": "concept", "C": "sprite", "P": "poses", "R": "animation", "S": "scene"}
+GATE_KIND = {"A": "spec", "B": "concept", "C": "sprite", "P": "poses", "R": "animation", "S": "scene", "K": "kit"}
 # what the user sees as progress: milestones, not internal steps
 STAGES = {
     "character": [("Plan", ["intake"]), ("Concept", ["concept"]),
@@ -56,6 +56,9 @@ STAGES["scene"] = [("Plan", ["scene_plan"]), ("Layers", ["scene_layers"]), ("Sea
 VERSIONED = {"character": ("artist", ("preview",)), "animation": ("anim_draw", ("gif", "gif_x4"))}
 VERSIONED["object"] = VERSIONED["character"]
 VERSIONED["scene"] = ("scene_pixel", ("composite",))
+STAGES["kit"] = [("Plan", ["kit_plan"]), ("Sheet", ["kit_sheet"]), ("Tiles", ["kit_read"]),
+                 ("Your approval", ["kit_review"]), ("Export", ["kit_export"])]
+VERSIONED["kit"] = ("kit_review", ("level",))
 # rough upper-bound cost (USD, OpenAI mode, 96 px) of running again from each milestone; measured on real runs
 REDO_USD = {
     "character": {"Plan": 0.02, "Concept": 0.20, "Pixel conversion": 1.10, "Drawing": 0.95, "Quality check": 0.02,
@@ -63,6 +66,7 @@ REDO_USD = {
     "animation": {"Plan": 0.01, "Poses": 0.07, "Frame traces": 2.00, "Drawing frames": 2.00, "Your approval": 0.0,
                   "Export": 0.0},
     "scene": {"Plan": 0.01, "Layers": 0.20, "Seams": 0.0, "Pixel art": 0.0, "Your approval": 0.0, "Export": 0.0},
+    "kit": {"Plan": 0.01, "Sheet": 0.06, "Tiles": 0.0, "Your approval": 0.0, "Export": 0.0},
 }
 
 
@@ -151,7 +155,7 @@ def estimates(settings=None):
     # revisions: one concept edit + material map + critique (~$0.12)
     character = NATIVE_CHARACTER if mode == "native" else REDUCE_CHARACTER
     return ({**ESTIMATES, "character": character, "animation_base": 0.15, "animation_per_frame": 0.0,
-             "revise_area": 0.15, "revise_whole": 0.15, "expression": 0.06, "object": 0.30, "scene": 0.25}
+             "revise_area": 0.15, "revise_whole": 0.15, "expression": 0.06, "object": 0.30, "scene": 0.25, "kit": 0.10}
             if mode in ("reduce", "native") else ESTIMATES)
 
 
@@ -258,6 +262,8 @@ def first_output(asset, pairs):
 
 
 def thumb_of(asset):
+    if asset.state.inputs.get("kind") == "kit":
+        return first_output(asset, [("kit_export", "level"), ("kit_review", "level"), ("kit_read", "tileset")])
     if asset.state.inputs.get("kind") == "scene":
         return first_output(asset, [("scene_export", "png"), ("scene_pixel", "composite"), ("scene_layers", "composite")])
     if asset.state.inputs.get("kind") == "animation":
@@ -286,8 +292,8 @@ def asset_summary(settings, pid, proj, aid, a=None):
     if kind == "animation":
         spec_name = (st.inputs.get("anim") or "animation").replace("_", " ").replace("-", " ").strip().capitalize()
     try:
-        if kind == "scene":
-            with open(a.output("scene_plan", "plan"), encoding="utf-8") as f:
+        if kind in ("scene", "kit"):
+            with open(a.output(f"{kind}_plan", "plan"), encoding="utf-8") as f:
                 spec_name = json.load(f).get("name") or spec_name
         elif kind != "animation":
             with open(a.output("intake", "spec"), encoding="utf-8") as f:
@@ -366,6 +372,16 @@ def asset_detail(settings, pid, proj, aid):
                 g["critique"] = {"overall": c.get("overall"), "issues": [i["problem"] for i in c.get("issues", [])][:5]}
             except (KeyError, OSError, ValueError):
                 pass
+        elif gs.gate == "K":
+            rd = a.state.steps["kit_read"]
+            g["image"] = file_url(pid, a, a.state.steps["kit_review"].outputs["level"])
+            g["tileset"] = file_url(pid, a, rd.outputs["tileset"])
+            with open(rd.outputs["tiles"] if os.path.isabs(rd.outputs["tiles"]) else a.path(rd.outputs["tiles"]),
+                      encoding="utf-8") as f:
+                tm = json.load(f)
+            g["decorations"] = [{"name": d["name"], "url": file_url(pid, a, rd.outputs[f"deco{n}"])}
+                                for n, d in enumerate(tm.get("decorations", [])) if f"deco{n}" in rd.outputs]
+            g["named"] = bool(rd.info.get("named"))
         elif gs.gate == "S":
             px = a.state.steps["scene_pixel"]
             g["image"] = file_url(pid, a, px.outputs["gif"])
@@ -415,12 +431,13 @@ def asset_detail(settings, pid, proj, aid):
                      "frames": meta.get("frames")}
     refs = [r for r in a.state.inputs.get("references") or [] if os.path.exists(a.path(r))]
     d["reference"] = file_url(pid, a, refs[0]) if refs else None
-    exp = a.state.steps.get({"animation": "anim_export", "scene": "scene_export"}.get(d["kind"], "export"))
+    exp = a.state.steps.get({"animation": "anim_export", "scene": "scene_export", "kit": "kit_export"}
+                            .get(d["kind"], "export"))
     if exp and exp.status == "done":
         d["exports"] = [{"key": k, "label": _export_label(k, d["kind"]), "url": file_url(pid, a, v) if not os.path.isdir(a.path(v)) else None,
                          "path": a.path(v)} for k, v in exp.outputs.items()]
         d["export_dir"] = a.path(a.state.steps[exp.name].info.get("dir", ""))
-    if d["kind"] not in ("animation", "scene"):
+    if d["kind"] not in ("animation", "scene", "kit"):
         # by the recorded parent, not the id prefix ("knight-2-walk" is not an animation of "knight")
         d["animations"] = [x for x in proj.asset_ids() if x != aid and proj.asset(x).state.inputs.get("character") == aid]
         ej = os.path.join(a.dir, "expressions", "expressions.json")
@@ -436,6 +453,11 @@ def asset_detail(settings, pid, proj, aid):
 
 
 def _export_label(k, kind=None):
+    if kind == "kit":
+        return {"tileset": "Tileset (PNG)", "decorations": "Decorations folder", "decorations_atlas": "Decorations (PNG)",
+                "tiled_tileset": "Tiled tileset (.tsx)", "tiled_level": "Tiled test level (.tmx)",
+                "godot": "Godot TileSet (.tres)", "level": "Test level (PNG)", "meta": "Metadata (JSON)",
+                "readme": "Import notes (README)"}.get(k, k)
     if kind == "scene":
         return {"png": "Backdrop (PNG)", "png_x2": "Backdrop 2× (PNG)", "parallax": "Parallax preview (GIF)",
                 "layers": "Layers folder", "meta": "Metadata (JSON)", "godot": "Godot scene (.tscn)",
@@ -544,7 +566,7 @@ def game_pack(settings, body):
     pid, aid = body["project"], body["id"]
     proj = Project(project_path(settings, pid), overrides(settings))
     a = proj.asset(aid)
-    if a.state.inputs.get("kind") in ("animation", "scene") or a.state.inputs.get("asset_type") == "prop":
+    if a.state.inputs.get("kind") in ("animation", "scene", "kit") or a.state.inputs.get("asset_type") == "prop":
         raise ValueError("a game pack is made for a character (it includes its animations)")
     _, zpath, summary = gamepack.build(proj, aid)
     return {"url": file_url(pid, a, os.path.relpath(zpath, a.dir)), **summary}
@@ -561,7 +583,7 @@ def make_expressions(settings, body):
     spend_check(settings, pid, aid)
     proj = Project(project_path(settings, pid), overrides(settings))
     a = proj.asset(aid)
-    if a.state.inputs.get("kind") in ("animation", "scene") or a.state.status != "complete" \
+    if a.state.inputs.get("kind") in ("animation", "scene", "kit") or a.state.status != "complete" \
             or a.state.inputs.get("asset_type") == "prop":
         raise ValueError("expressions are made for a finished character")
     if proj.config.get("finish", {}).get("mode") != "native":
@@ -580,7 +602,7 @@ def create_move_set(settings, body):
     spend_check(settings, pid)
     proj = Project(project_path(settings, pid), overrides(settings))
     a = proj.asset(char)
-    if a.state.inputs.get("kind") in ("animation", "scene") or a.state.inputs.get("asset_type") == "prop":
+    if a.state.inputs.get("kind") in ("animation", "scene", "kit") or a.state.inputs.get("asset_type") == "prop":
         raise ValueError("a move set is made for a character")
     ids = []
     for m in dict.fromkeys(moves):
@@ -590,6 +612,24 @@ def create_move_set(settings, body):
         start_run(settings, pid, aid)
         ids.append(aid)
     return {"ids": ids}
+
+
+def create_kit(settings, body):
+    """A walkable kit (tiles and decorations), optionally matched to a finished scene of the project."""
+    pid = body["project"]
+    spend_check(settings, pid)
+    proj = Project(project_path(settings, pid), overrides(settings))
+    prompt = (body.get("prompt") or "").strip()
+    if not prompt:
+        raise ValueError("describe the ground, for example: mossy forest ground with roots and stones")
+    scene = body.get("scene") or None
+    if scene and (scene not in proj.asset_ids() or proj.asset(scene).state.inputs.get("kind") != "scene"):
+        raise ValueError("that scene is not in this project")
+    name = (body.get("name") or "").strip()
+    aid = unique_id(proj, safe_id(name or prompt.split(",")[0] or "kit"))
+    proj.new_asset(aid, {"kind": "kit", "prompt": prompt, "name": name or None, "scene": scene})
+    start_run(settings, pid, aid)
+    return {"id": aid}
 
 
 def create_scene(settings, body):
@@ -1021,6 +1061,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(create_animation(s, body))
             if u.path == "/api/movesets":
                 return self._json(create_move_set(s, body))
+            if u.path == "/api/kits":
+                return self._json(create_kit(s, body))
             if u.path == "/api/scenes":
                 return self._json(create_scene(s, body))
             if u.path == "/api/itemsheet":
