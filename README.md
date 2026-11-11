@@ -158,6 +158,11 @@ far more pixels than asked. Objects have their own palette grade (`[finish] prop
 colours; Light by default, so gold and potion reds stay readable). About $0.29 an object (two drafts without a
 reference).
 
+**Item sheet** (the Item sheet button in the Objects library, or `python -m pixelagent --project P itemsheet`):
+every finished object of the project in one atlas of uniform square cells (centred, 1x). It comes with
+TexturePacker JSON (trimmed rectangles, cells, a bottom-centre pivot), a Godot 4 AtlasTexture per item, the single
+PNGs and a README. Free.
+
 ## Game pack
 `python -m pixelagent --project P pack CHARACTER` (or Save next to "Game pack" in the app's Exports card) writes
 `assets/CHARACTER/game_pack/` and a zip of it. It holds one atlas with uniform cells, where the standing sprite,

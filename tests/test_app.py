@@ -363,6 +363,22 @@ class AppServerTest(unittest.TestCase):
         self.assertEqual(self.post("/api/expressions", {"project": pid, "id": oid})[0], 400)   # no face
         self.assertEqual(self.post("/api/movesets", {"project": pid, "character": oid})[0], 400)
         self.assertIn("object", self.ok(self.get("/api/overview"))["estimates"])
+        import io
+        import zipfile
+        r = self.ok(self.post("/api/itemsheet", {"project": pid}))
+        self.assertEqual(len(r["items"]), 1)
+        status, data = self.get(r["url"])
+        self.assertEqual(status, 200)
+        z = zipfile.ZipFile(io.BytesIO(data))
+        names = z.namelist()
+        self.assertIn("item_sheet/items.png", names)
+        meta = json.loads(z.read("item_sheet/items.json"))
+        (name, fr), = meta["frames"].items()
+        self.assertEqual(fr["sourceSize"], {"w": r["cell"], "h": r["cell"]})
+        self.assertEqual(r["cell"] % 8, 0)
+        self.assertIn(f"item_sheet/godot/{name}.tres", names)
+        empty = self.new_project("No items")
+        self.assertEqual(self.post("/api/itemsheet", {"project": empty})[0], 400)
 
     def test_rename_duplicate_and_delete_items(self):
         pid = self.new_project("Manage")

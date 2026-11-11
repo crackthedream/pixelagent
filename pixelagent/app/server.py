@@ -504,6 +504,16 @@ MOVES = {
 }
 
 
+def item_sheet(settings, body):
+    """Build the project's item sheet (every finished object in one atlas) and return its zip's URL."""
+    from .. import itemsheet
+    pid = body["project"]
+    proj = Project(project_path(settings, pid), overrides(settings))
+    _, zpath, summary = itemsheet.build(proj)
+    rel = os.path.relpath(zpath, proj.root).replace("\\", "/")
+    return {"url": "/files?" + urlencode({"project": pid, "path": rel}, quote_via=quote), **summary}
+
+
 def game_pack(settings, body):
     """Build a character's game pack (atlas, Aseprite JSON, Godot SpriteFrames, README) and return its zip's URL."""
     from .. import gamepack
@@ -972,6 +982,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(create_animation(s, body))
             if u.path == "/api/movesets":
                 return self._json(create_move_set(s, body))
+            if u.path == "/api/itemsheet":
+                return self._json(item_sheet(s, body))
             if u.path == "/api/gamepack":
                 return self._json(game_pack(s, body))
             if u.path == "/api/expressions":

@@ -214,10 +214,21 @@ function renderLibrary(kind) {
         `<button data-filter="${v}" aria-pressed="${filter === v}">${l}</button>`).join("")}
     </div>
     ${kind === "character" ? `<button class="btn primary round" id="btn-new">${icon("plus")}New character</button>`
-      : kind === "object" ? `<button class="btn primary round" id="btn-new">${icon("plus")}New object</button>` : ""}`);
+      : kind === "object" ? `${state.items.some((i) => i.kind === "object" && i.status === "complete")
+        ? `<button class="btn round" id="btn-sheet" title="Every finished object in one atlas, for a game engine">${icon("export")}Item sheet</button>` : ""}
+        <button class="btn primary round" id="btn-new">${icon("plus")}New object</button>` : ""}`);
   document.querySelectorAll("[data-filter]").forEach((b) => b.onclick = () => { sessionStorage.setItem("filter-" + kind, b.dataset.filter); render(); });
   const nb = $("#btn-new");
   if (nb) nb.onclick = () => (kind === "object" ? sheetNewObject() : sheetNewCharacter());
+  const sb = $("#btn-sheet");
+  if (sb) sb.onclick = async () => {
+    const r = await act(() => api("/api/itemsheet", { project: project() }));
+    if (r) {
+      const link = document.createElement("a");
+      link.href = r.url; link.download = ""; document.body.appendChild(link); link.click(); link.remove();
+      toast(`Item sheet: ${r.items.length} object${r.items.length === 1 ? "" : "s"} in ${r.cell} px cells`);
+    }
+  };
 
   let items = state.items.filter((i) => i.kind === kind);
   const all = items.length;

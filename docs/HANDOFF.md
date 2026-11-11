@@ -709,8 +709,9 @@ app sheet ("New object", "New background") and benchmark.
 | Checks | Lint, critic, face, frame consistency | Lint, silhouette readability at 1x | Seam lint (left/right edges match), parallax layer alpha, colour count per layer |
 | Export | PNG, layers, animation | PNG, icon sizes, item sheet | Layered parallax PNGs, tileable strips, a PixelLiner project |
 
-7. **Objects/props:** a first version is done (see "Done" above). Next: an item sheet export (several items in one
-   atlas, icon sizes) and the owner's ratings; it reuses most character steps; the work is object-aware material labels, the size rules,
+7. **Objects/props:** done, with the item sheet export (`pixelagent/itemsheet.py`). Next: the owner's ratings on
+   more items, and an inventory-icon variant drawn at icon size (16-32 px) rather than shrunk; it reuses most
+   character steps; the work is object-aware material labels, the size rules,
    skipping the face pass and animation, and an "item sheet" export. Done when three benchmark props (for
    example a weapon, a chest, a potion) export cleanly from a prompt.
 8. **Backgrounds/scenes:** a new pipeline (layout plan → per-layer concepts → per-layer conversion → targeted

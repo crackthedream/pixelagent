@@ -51,6 +51,13 @@ def cmd_pack(args):
           f"pivot {summary['pivot']}; animations: {', '.join(summary['animations'])}")
 
 
+def cmd_itemsheet(args):
+    from . import itemsheet
+    folder, zpath, summary = itemsheet.build(_project(args))
+    print(f"item sheet: {zpath}")
+    print(f"  {len(summary['items'])} objects in {summary['cell']} px cells: {', '.join(summary['items'])}")
+
+
 def cmd_status(args):
     p = _project(args)
     ids = [args.id] if args.id else p.asset_ids()
@@ -152,6 +159,9 @@ def main(argv=None):
     s = sub.add_parser("pack", help="a finished character's game pack: atlas, Aseprite JSON, Godot SpriteFrames")
     s.add_argument("id")
     s.set_defaults(fn=cmd_pack)
+
+    s = sub.add_parser("itemsheet", help="every finished object of the project in one atlas, for a game engine")
+    s.set_defaults(fn=cmd_itemsheet)
 
     s = sub.add_parser("status")
     s.add_argument("id", nargs="?")
