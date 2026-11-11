@@ -137,6 +137,32 @@ class AnimationTests(unittest.TestCase):
             got = imaging.to_bytes(f)
             self.assertLessEqual(max(abs(got[k] - want[k]) for k in range(len(got)) if k % 4 != 3 and got[k - k % 4 + 3]), 3, i)
 
+    def test_frames_drawn_too_big_are_read_back_at_the_sprites_height(self):
+        from PIL import Image
+        from pixelagent.steps.anim import read_pixel_frames
+        sprite = imaging.load_rgba(self.proj.asset("hero").output("export", "png"))
+        sprite = sprite.crop(sprite.getbbox())
+        block, n = 6, 4
+        for scale in (1.0, 1.12, 0.9):                     # the image model drew the walk this much bigger/smaller
+            big = sprite.resize((round(sprite.width * scale), round(sprite.height * scale)), Image.NEAREST)
+            big = big.resize((big.width * block, big.height * block), Image.NEAREST)
+            sheet = Image.new("RGBA", (n * (big.width + 60), big.height + 80), (222, 222, 226, 255))
+            boxes = []
+            for i in range(n):
+                x = 30 + i * (big.width + 60)
+                sheet.alpha_composite(big, (x, 40))
+                boxes.append((x, 40, x + big.width, 40 + big.height))
+            frames, s, info = read_pixel_frames(sheet, boxes, block, sprite.height)
+            for f in frames:
+                self.assertLessEqual(abs(f.height - sprite.height), 1, (scale, f.size))
+            self.assertEqual(info["resized"], scale != 1.0, scale)
+            if scale == 1.0:                               # within tolerance: exactly as drawn
+                import numpy as np
+                f0, sp0 = np.asarray(frames[0]).copy(), np.asarray(sprite).copy()
+                f0[f0[..., 3] == 0] = 0                   # transparent pixels: RGB does not matter
+                sp0[sp0[..., 3] == 0] = 0
+                self.assertTrue(np.array_equal(f0, sp0))
+
     def test_reduce_review_note_goes_to_the_pose_sheet(self):
         pipe = self._anim("hero-hop", "hop", 3)
         self.assertEqual(pipe.run(log=quiet), "awaiting_gate")                    # gate P

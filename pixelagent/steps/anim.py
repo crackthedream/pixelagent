@@ -53,6 +53,34 @@ def _sheet_block(ch, n, size):
     return max(3, min(int(H * 0.82 / sh), int(W / n * 0.78 / sw))), sh
 
 
+def read_pixel_frames(sheet, boxes, block, target_h, tol=0.03):
+    """Read each figure of a pixel-art pose sheet back at 1x on ONE block size measured on the whole sheet. The image
+    model draws walking figures a little bigger or smaller than asked (~6% taller than the standing sprite seen);
+    when the frames' median height is off by more than tol, the sheet is read again on a proportionally larger
+    (smaller) regular grid -- a resize done on the drawn high-resolution sheet, where each 1x pixel takes its patch's
+    dominant colour, instead of on the finished 1x frames. Returns (frames, image px per sprite px, info)."""
+    from ..pixelart import find_grid, sprite_from_pixel_art
+    g = find_grid(sheet, expected=block)
+
+    def read(period, snap):
+        out = []
+        for b in boxes:
+            pad = int(block * 2)
+            crop = sheet.crop((max(0, b[0] - pad), max(0, b[1] - pad), min(sheet.width, b[2] + pad),
+                               min(sheet.height, b[3] + pad)))
+            sp, _ = sprite_from_pixel_art(crop, margin=0, period=period, snap=snap)
+            out.append(sp.crop(sp.getbbox()) if sp.getbbox() else sp)
+        return out
+    frames = read((g["px"], g["py"]), True)
+    heights = sorted(f.height for f in frames)
+    ratio = heights[len(heights) // 2] / float(max(1, target_h))
+    info = {"drawn_height": heights[len(heights) // 2], "target_height": int(target_h), "resized": False}
+    if abs(ratio - 1) > tol:
+        frames = read((g["px"] * ratio, g["py"] * ratio), False)
+        info.update(resized=True, ratio=round(ratio, 3))
+    return frames, (g["px"] + g["py"]) / 2 * (ratio if info["resized"] else 1.0), info
+
+
 def reduce_mode(ctx):
     """The reduce finish (soft look): frames are the pose sheet's own reductions, like the character itself."""
     # native characters animate through the same path for now (a pixel-art pose sheet is a later step)
@@ -185,23 +213,12 @@ def traces(ctx):
     body_h = (sb[3] - sb[1]) - 2 * ol                 # the approved sprite's height without its outline
     ground = max(b[3] for b in boxes)                  # common ground line of the sheet
     if native_mode(ctx):
-        # each figure is pixel art on the sheet's block grid: read it back pixel for pixel (no rescaling, so the
-        # frames keep the drawn pixels); one scale for the ground line = the median block size found
-        from ..pixelart import sprite_from_pixel_art
+        # each figure is pixel art on the sheet's block grid: read back pixel for pixel on one block size, and at the
+        # standing sprite's height (read_pixel_frames)
         sheet = imaging.load_rgba(ctx.input("anim_poses", "sheet"))
         block = ctx.asset.state.steps["anim_poses"].info.get("block") or 8
-        from ..pixelart import find_grid
-        g = find_grid(sheet, expected=block)               # ONE block size for every frame (sizes stay equal)
-        period = (g["px"], g["py"])
-        small, ps = [], []
-        for b in boxes:
-            pad = int(block * 2)
-            crop = sheet.crop((max(0, b[0] - pad), max(0, b[1] - pad), min(sheet.width, b[2] + pad),
-                               min(sheet.height, b[3] + pad)))
-            sp, geom = sprite_from_pixel_art(crop, margin=0, period=period)
-            small.append(sp.crop(sp.getbbox()) if sp.getbbox() else sp)
-            ps.append(geom["grid"]["p"])
-        s = sorted(ps)[len(ps) // 2]
+        small, s, fit = read_pixel_frames(sheet, boxes, block, sb[3] - sb[1])
+        ctx.info["frame_size"] = fit
     else:
         heights = sorted(b[3] - b[1] for b in boxes)
         s = heights[len(heights) // 2] / float(body_h)    # one scale for all frames: median figure = sprite height

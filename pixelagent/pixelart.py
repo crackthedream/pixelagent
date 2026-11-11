@@ -55,9 +55,10 @@ def _autocorr_period(profile, lo, hi):
     return best[1]
 
 
-def _walk(profile, p, length):
+def _walk(profile, p, length, snap=True):
     """Block edges along one axis, following the drift: start at the strongest comb phase, then step one block at a
-    time and snap each edge to the strongest edge within +-30% of a block (flat areas keep the plain step)."""
+    time and snap each edge to the strongest edge within +-30% of a block (flat areas keep the plain step). Without
+    snap the edges are a plain regular grid (reading at a block size other than the drawn one: a resize)."""
     pos = np.arange(len(profile))
     nb = max(2, int(np.ceil(p)))
     bins = np.minimum(nb - 1, np.floor(np.mod(pos, p) / p * nb).astype(int))
@@ -69,14 +70,14 @@ def _walk(profile, p, length):
         guess = edges[-1] + p
         lo_, hi_ = int(round(guess - 0.3 * p)), int(round(guess + 0.3 * p))
         win = profile[max(0, lo_ - 1):max(0, hi_ - 1) + 1]       # profile[i] is the edge between i and i+1
-        if len(win) and win.max() >= strong:
+        if snap and len(win) and win.max() >= strong:
             edges.append(float(max(0, lo_ - 1) + int(win.argmax()) + 1))
         else:
             edges.append(guess)
     return edges
 
 
-def find_grid(img, expected=None, period=None):
+def find_grid(img, expected=None, period=None, snap=True):
     """The block grid of an image of crisp blocks: {'p': mean block size, 'x0', 'y0': the first block edges, 'xs',
     'ys': every block edge (following the drift of an image model's pixels)}. `expected`: the block size asked for;
     the search stays within 0.7-1.45x of it (rules out half and double: image models sometimes draw small details at
@@ -94,7 +95,7 @@ def find_grid(img, expected=None, period=None):
     else:
         # each axis on its own: an image model's blocks are often not square (9.4 x 11.0 px seen)
         px, py = _autocorr_period(profx, lo, hi), _autocorr_period(profy, lo, hi)
-    xs, ys = _walk(profx, px, W), _walk(profy, py, H)
+    xs, ys = _walk(profx, px, W, snap), _walk(profy, py, H, snap)
     return {"p": round((px + py) / 2, 3), "px": round(px, 3), "py": round(py, 3), "x0": round(xs[0], 3),
             "y0": round(ys[0], 3), "xs": [round(v, 2) for v in xs], "ys": [round(v, 2) for v in ys]}
 
@@ -138,7 +139,7 @@ def cut_background(cells, tol=24):
     return ~bg
 
 
-def sprite_from_pixel_art(img, margin=2, grid=None, expected=None, period=None):
+def sprite_from_pixel_art(img, margin=2, grid=None, expected=None, period=None, snap=True):
     """An image of a pixel-art sprite drawn as crisp blocks -> (the sprite at 1x as RGBA with `margin` transparent
     pixels around it, geometry in the pipeline's convention: sprite pixel (X, Y) comes from the image area starting
     at gx0 + (X - margin + crop_x) * s, gy0 + (Y - margin + crop_y) * s). `grid` reuses a known grid (an area
@@ -148,7 +149,7 @@ def sprite_from_pixel_art(img, margin=2, grid=None, expected=None, period=None):
         flat = Image.new("RGBA", img.size, (222, 222, 226, 255))
         flat.alpha_composite(img)
         img = flat
-    grid = grid or find_grid(img, expected, period)
+    grid = grid or find_grid(img, expected, period, snap)
     cells = read_blocks(img, grid)
     fig = cut_background(cells)
     ys, xs = np.nonzero(fig)

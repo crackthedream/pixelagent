@@ -299,12 +299,18 @@ drawn strands, each eye a distinct pixel shape. The reduce finish gives a soft b
   The block is as large as the sheet allows for the frame count and sprite size (`anim._sheet_block`). One block
   size is measured on the whole sheet, each frame is read back pixel for pixel on it, colours are mapped to the
   character's palette, and no speck merging is done (single pixels are deliberate).
+- **Frame size** (`anim.read_pixel_frames`): the image model draws the walking figures a little bigger than the
+  standing sprite. When the frames' median height is more than 3% off the sprite's, the sheet is read again on a
+  proportionally larger regular grid (no edge snapping), so each 1x pixel takes its patch's dominant colour. The
+  resize happens on the drawn high-resolution sheet, not on the finished frames. `anim_traces` info records
+  `frame_size` (drawn and target height, ratio).
 - **Grid fixes found on the way:**
   - the autocorrelation is detrended: it is high at every small lag, so the smallest period always won (a 3-px sheet
     read as 2 px);
   - each axis has its own block size: image models draw non-square blocks (9.4 × 11.0 px seen).
 - **First real pixel-art walk** (ref05, 6 frames, $0.07 in 85 s): consistent pixel-art frames in the character's
-  style with a real stepping motion, 168-174 px tall, about 6% taller than the 161-px standing sprite.
+  style with a real stepping motion, 168-174 px tall, about 6% taller than the 161-px standing sprite. Read again
+  at the sprite's height (ratio 1.062): 160-164 px, the faces and hands stay clean.
 - **Real run** (`bench_runs_native2`, ref08/02/05/03, $0.74): genuine pixel-art sprites with crisp clusters and
   pixel faces, 4.0-4.6 heads, 147-170 px, 30-56 colours. They are still darker and more saturated than Noel (dark
   hair and navy costumes), and the hair has darker edges in places.
