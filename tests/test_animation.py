@@ -7,6 +7,8 @@ import shutil
 import sys
 import tempfile
 import unittest
+
+import numpy as np
 from types import SimpleNamespace as NS
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -143,7 +145,7 @@ class AnimationTests(unittest.TestCase):
         sprite = imaging.load_rgba(self.proj.asset("hero").output("export", "png"))
         sprite = sprite.crop(sprite.getbbox())
         block, n = 6, 4
-        for scale in (1.0, 1.12, 0.9):                     # the image model drew the walk this much bigger/smaller
+        for scale in (1.0, 1.12, 1.3, 0.9):               # the image model drew the walk this much bigger/smaller
             big = sprite.resize((round(sprite.width * scale), round(sprite.height * scale)), Image.NEAREST)
             big = big.resize((big.width * block, big.height * block), Image.NEAREST)
             sheet = Image.new("RGBA", (n * (big.width + 60), big.height + 80), (222, 222, 226, 255))
@@ -153,15 +155,58 @@ class AnimationTests(unittest.TestCase):
                 sheet.alpha_composite(big, (x, 40))
                 boxes.append((x, 40, x + big.width, 40 + big.height))
             frames, s, info = read_pixel_frames(sheet, boxes, block, sprite.height)
+            want = sprite.height if scale >= 1 else round(sprite.height * scale)   # smaller: the pose, kept as drawn
             for f in frames:
-                self.assertLessEqual(abs(f.height - sprite.height), 1, (scale, f.size))
-            self.assertEqual(info["resized"], scale != 1.0, scale)
+                self.assertLessEqual(abs(f.height - want), 1, (scale, f.size))
+            # a jump: half the frames crouch (shorter on purpose); the upright half sets the scale
+            crouch = sprite.crop((0, 0, sprite.width, sprite.height)).resize(
+                (sprite.width, int(sprite.height * 0.7)), Image.NEAREST)
+            crouch = crouch.resize((round(crouch.width * scale), round(crouch.height * scale)), Image.NEAREST)
+            crouch = crouch.resize((crouch.width * block, crouch.height * block), Image.NEAREST)
+            sheet2 = sheet.copy()
+            boxes2 = list(boxes)
+            for i in (0, 2):
+                x = boxes[i][0]
+                sheet2.paste((222, 222, 226, 255), (x - 6, 0, x + big.width + 6, sheet2.height))
+                y = 40 + big.height - crouch.height
+                sheet2.alpha_composite(crouch, (x, y))
+                boxes2[i] = (x, y, x + crouch.width, y + crouch.height)
+            frames2, _, info2 = read_pixel_frames(sheet2, boxes2, block, sprite.height)
+            self.assertEqual(info2["resized"], scale > 1.0, ("jump", scale))
+            for i in (1, 3):
+                self.assertLessEqual(abs(frames2[i].height - want), 1, ("jump", scale, frames2[i].size))
+            self.assertEqual(info["resized"], scale > 1.0, scale)
             if scale == 1.0:                               # within tolerance: exactly as drawn
                 import numpy as np
                 f0, sp0 = np.asarray(frames[0]).copy(), np.asarray(sprite).copy()
                 f0[f0[..., 3] == 0] = 0                   # transparent pixels: RGB does not matter
                 sp0[sp0[..., 3] == 0] = 0
                 self.assertTrue(np.array_equal(f0, sp0))
+
+    def test_frame_cleanup_drops_neighbour_pieces_and_specks(self):
+        from PIL import Image
+        from pixelagent.steps.anim import clean_frame
+        f = Image.new("RGBA", (40, 50), (0, 0, 0, 0))
+        f.paste((200, 60, 60, 255), (10, 5, 30, 45))        # the figure
+        f.paste((60, 60, 200, 255), (0, 10, 3, 30))         # a neighbour's sliver at the crop's edge
+        f.paste((10, 10, 10, 255), (36, 47, 38, 49))        # a far speck (4 px)
+        f.paste((240, 240, 240, 255), (31, 20, 32, 22))     # a detached detail next to the figure (kept)
+        out = np.asarray(clean_frame(f))
+        self.assertEqual(out.shape[:2], (40, 22))           # cropped to the figure + its detail
+        self.assertEqual(int((out[..., 3] > 0).sum()), 20 * 40 + 2)
+        whole = Image.new("RGBA", (20, 20), (0, 0, 0, 0))
+        whole.paste((1, 2, 3, 255), (2, 2, 18, 18))
+        self.assertIs(clean_frame(whole), whole)            # one piece: unchanged
+
+    def test_native_pose_sheet_is_laid_out_on_the_sprite(self):
+        from pixelagent.steps.anim import layout_sheet
+        sprite = imaging.load_rgba(self.proj.asset("hero").output("export", "png"))
+        sheet = layout_sheet(sprite, 4, 5, "1536x1024")
+        boxes = [b for _, b in imaging.split_sheet(sheet, 4)]
+        sh = sprite.getbbox()[3] - sprite.getbbox()[1]
+        self.assertEqual(len(boxes), 4)
+        self.assertTrue(all(b[3] - b[1] == sh * 5 for b in boxes), boxes)         # the final size x the block
+        self.assertEqual(len({b[3] for b in boxes}), 1)                           # one ground line
 
     def test_reduce_review_note_goes_to_the_pose_sheet(self):
         pipe = self._anim("hero-hop", "hop", 3)

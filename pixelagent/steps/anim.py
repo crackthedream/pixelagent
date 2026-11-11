@@ -53,10 +53,84 @@ def _sheet_block(ch, n, size):
     return max(3, min(int(H * 0.82 / sh), int(W / n * 0.78 / sw))), sh
 
 
+def layout_sheet(sprite, n, block, size, bob=0):
+    """The pose sheet's layout for the native finish: the finished sprite placed n times at its final pixel scale (one
+    sprite pixel = block x block image pixels), centred in n equal cells on one ground line. The image model redraws
+    each copy in its pose: without it, it drew the figures 0.8-1.35x the sprite's size and crowded them so they were
+    cut apart wrongly (move-set run, 2026-11-11). bob (sprite pixels) lifts the copies on a sine: the dry-run sheet."""
+    from PIL import Image
+    sp = sprite.crop(sprite.getbbox())
+    big = sp.resize((sp.width * block, sp.height * block), Image.NEAREST)
+    W, H = (int(v) for v in size.split("x"))
+    cell = W // n
+    sheet = Image.new("RGBA", (W, H), (222, 222, 226, 255))
+    ground = H - max(40, (H - big.height) // 3)
+    for i in range(n):
+        lift = block * int(round(bob * np.sin(i / n * 2 * np.pi)))
+        x = i * cell + (cell - big.width) // 2 // block * block
+        sheet.alpha_composite(big, (x, ground - big.height - lift))
+    return sheet
+
+
+def _components(mask):
+    """8-connected components of a boolean mask: a label array (0 = background) and the size of each label."""
+    from collections import deque
+    h, w = mask.shape
+    lab = np.zeros((h, w), np.int32)
+    sizes = [0]
+    for y0, x0 in zip(*np.nonzero(mask)):
+        if lab[y0, x0]:
+            continue
+        k = len(sizes)
+        lab[y0, x0] = k
+        q, n = deque([(y0, x0)]), 0
+        while q:
+            y, x = q.popleft()
+            n += 1
+            for dy in (-1, 0, 1):
+                for dx in (-1, 0, 1):
+                    yy, xx = y + dy, x + dx
+                    if 0 <= yy < h and 0 <= xx < w and mask[yy, xx] and not lab[yy, xx]:
+                        lab[yy, xx] = k
+                        q.append((yy, xx))
+        sizes.append(n)
+    return lab, sizes
+
+
+def clean_frame(frame):
+    """Drop what is not this frame's figure: pieces of a neighbouring figure that enter at the crop's edge (smaller
+    than a third of the figure) and specks of under 5 pixels further than 2 pixels from it."""
+    from PIL import Image
+    a = np.asarray(frame.convert("RGBA")).copy()
+    lab, sizes = _components(a[..., 3] > 0)
+    if len(sizes) <= 2:
+        return frame
+    main = int(np.argmax(sizes))
+    near = lab == main
+    for _ in range(2):                                    # the figure grown by 2 pixels
+        g = near.copy()
+        g[1:] |= near[:-1]; g[:-1] |= near[1:]; g[:, 1:] |= near[:, :-1]; g[:, :-1] |= near[:, 1:]
+        near = g
+    h, w = lab.shape
+    edge = set(np.unique(np.concatenate([lab[0], lab[-1], lab[:, 0], lab[:, -1]])).tolist())
+    for k in range(1, len(sizes)):
+        if k == main:
+            continue
+        piece = lab == k
+        if (k in edge and sizes[k] < sizes[main] / 3) or (sizes[k] < 5 and not (piece & near).any()):
+            a[piece] = 0
+    out = Image.fromarray(a)
+    return out.crop(out.getbbox()) if out.getbbox() else out
+
+
 def read_pixel_frames(sheet, boxes, block, target_h, tol=0.03):
     """Read each figure of a pixel-art pose sheet back at 1x on ONE block size measured on the whole sheet. The image
     model draws walking figures a little bigger or smaller than asked (~6% taller than the standing sprite seen);
-    when the frames' median height is off by more than tol, the sheet is read again on a proportionally larger
+    the scale comes from the TALLER half of the frames -- the upright ones: a jump's or an attack's crouching frames
+    are short on purpose. Only figures drawn BIGGER are corrected (up to 1.4x): with the layout reference the size is
+    pinned, and a shorter reading is the pose itself (a run's tallest frames still lean: enlarging them by 11% made
+    the runner bigger than the character, 2026-11-11). When it is more than tol too big, the sheet is read again on a
+    proportionally larger
     (smaller) regular grid -- a resize done on the drawn high-resolution sheet, where each 1x pixel takes its patch's
     dominant colour, instead of on the finished 1x frames. Returns (frames, image px per sprite px, info)."""
     from ..pixelart import find_grid, sprite_from_pixel_art
@@ -69,13 +143,15 @@ def read_pixel_frames(sheet, boxes, block, target_h, tol=0.03):
             crop = sheet.crop((max(0, b[0] - pad), max(0, b[1] - pad), min(sheet.width, b[2] + pad),
                                min(sheet.height, b[3] + pad)))
             sp, _ = sprite_from_pixel_art(crop, margin=0, period=period, snap=snap)
-            out.append(sp.crop(sp.getbbox()) if sp.getbbox() else sp)
+            out.append(clean_frame(sp.crop(sp.getbbox())) if sp.getbbox() else sp)
         return out
     frames = read((g["px"], g["py"]), True)
-    heights = sorted(f.height for f in frames)
-    ratio = heights[len(heights) // 2] / float(max(1, target_h))
-    info = {"drawn_height": heights[len(heights) // 2], "target_height": int(target_h), "resized": False}
-    if abs(ratio - 1) > tol:
+    heights = sorted((f.height for f in frames), reverse=True)
+    upright = heights[:(len(heights) + 1) // 2]
+    drawn = upright[len(upright) // 2]
+    ratio = drawn / float(max(1, target_h))
+    info = {"drawn_height": drawn, "target_height": int(target_h), "resized": False}
+    if 1 + tol < ratio <= 1.4:
         frames = read((g["px"] * ratio, g["py"] * ratio), False)
         info.update(resized=True, ratio=round(ratio, 3))
     return frames, (g["px"] + g["py"]) / 2 * (ratio if info["resized"] else 1.0), info
@@ -132,7 +208,7 @@ def poses(ctx):
     block = None
     if native_mode(ctx):
         block, sprite_h = _sheet_block(ch, n, size)
-        prompt += prompts.POSE_SHEET_PIXEL.format(block=block, height=sprite_h)
+        prompt += prompts.POSE_SHEET_PIXEL.format(block=block, height=sprite_h, n=n)
         ctx.info["block"] = block
     elif reduce_mode(ctx):
         # the frames are reduced straight from this sheet: it must be drawn like the concept, not as pixel art
@@ -142,21 +218,16 @@ def poses(ctx):
         prompt += "\nChanges requested: " + "; ".join(notes)
     with open(ctx.path("pose_prompt.txt"), "w", encoding="utf-8") as f:
         f.write(prompt)
-    sprite_ref = ctx.save_image(None, "sprite_ref.png", imaging.zoom(imaging.load_rgba(ch["png"]), 6))
+    sprite = imaging.load_rgba(ch["png"])
+    if block:
+        # the layout pins the figures' size, scale and spacing; the sprite alone at the same scale shows the design
+        refs = [ctx.save_image(None, "layout.png", layout_sheet(sprite, n, block, size)),
+                ctx.save_image(None, "sprite_ref.png", imaging.zoom(sprite.crop(sprite.getbbox()), block))]
+    else:
+        refs = [ch["concept"], ctx.save_image(None, "sprite_ref.png", imaging.zoom(sprite, 6))]
 
-    def native_stub(k, out_dir):  # dry run, native: the sprite as crisp blocks, repeated with a little bob per frame
-        from PIL import Image
-        from ..pixelart import enlarge  # noqa: F401  (same block look as the image model's sheet)
-        sp = imaging.load_rgba(ch["png"])
-        sp = sp.crop(sp.getbbox())
-        big = sp.resize((sp.width * block, sp.height * block), Image.NEAREST)
-        W, H = (int(v) for v in size.split("x"))
-        cell = W // n
-        sheet = Image.new("RGBA", (W, H), (222, 222, 226, 255))
-        for i in range(n):
-            bob = block * int(round(2 * np.sin(i / n * 2 * np.pi)))
-            x = i * cell + (cell - big.width) // 2 // block * block
-            sheet.alpha_composite(big, (x, H - 40 - big.height - bob))
+    def native_stub(k, out_dir):  # dry run, native: the layout with a little bob per frame
+        sheet = layout_sheet(sprite, n, block, size, bob=2)
         p = os.path.join(out_dir, "gen00.png")
         sheet.convert("RGB").save(p)
         return [p]
@@ -182,7 +253,7 @@ def poses(ctx):
     old = ctx.cfg["images"].get("draft_size")
     ctx.cfg["images"]["draft_size"] = size
     try:
-        out = ctx.backend.images.generate("image_final", prompt, 1, ctx.path("generated"), [ch["concept"], sprite_ref],
+        out = ctx.backend.images.generate("image_final", prompt, 1, ctx.path("generated"), refs,
                                           stub, quality=ctx.cfg.get("animation", {}).get("sheet_quality", "medium"))
     finally:
         ctx.cfg["images"]["draft_size"] = old

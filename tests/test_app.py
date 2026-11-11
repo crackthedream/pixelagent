@@ -286,6 +286,20 @@ class AppServerTest(unittest.TestCase):
         self.assertEqual(d["status"], "complete")
         self.assertEqual(self.asset(pid, cid)["animations"], [aid])
 
+    def test_move_set_starts_one_animation_per_move(self):
+        pid = self.new_project("Moves")
+        cid = self.ok(self.post("/api/characters", {"project": pid, "prompt": "a small knight"}))["id"]
+        self.assertEqual(self.drive(pid, cid)["status"], "complete")
+        self.assertEqual(self.post("/api/movesets", {"project": pid, "character": cid, "moves": ["dance"]})[0], 400)
+        ids = self.ok(self.post("/api/movesets", {"project": pid, "character": cid, "moves": ["idle", "jump", "hurt"]}))["ids"]
+        self.assertEqual(ids, [f"{cid}-idle", f"{cid}-jump", f"{cid}-hurt"])
+        for aid, n in zip(ids, (4, 6, 3)):
+            d = self.wait_idle(pid, aid)
+            self.assertEqual(d["gate_detail"]["kind"], "poses", aid)          # each stops for its poses
+            self.assertEqual(Project(os.path.join(self.projects, pid)).asset(aid).state.inputs["frames"], n)
+        self.assertEqual(sorted(self.asset(pid, cid)["animations"]), sorted(ids))
+        self.assertEqual(self.post("/api/movesets", {"project": pid, "character": ids[0]})[0], 400)  # not for an animation
+
     def test_rename_duplicate_and_delete_items(self):
         pid = self.new_project("Manage")
         proj = Project(os.path.join(self.projects, pid))

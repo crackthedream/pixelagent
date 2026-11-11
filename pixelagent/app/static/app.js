@@ -407,7 +407,8 @@ function inspector(d) {
       ${anims.length ? `<div class="list">${anims.map((a) => `
         <a class="row" href="#/item/${encodeURIComponent(a.id)}"><span class="stage thumb">${stageImg(a.thumb, a.name)}</span>
           <span class="grow">${esc(a.name)}</span></a>`).join("")}</div>` : `<p class="muted" style="margin:0 0 10px">None yet.</p>`}
-      <button class="btn" id="btn-new-anim" style="margin-top:8px">${icon("plus")}New animation</button></div>`;
+      <div class="row-actions" style="margin-top:8px"><button class="btn" id="btn-new-anim">${icon("plus")}New animation</button>
+        <button class="btn" id="btn-move-set">${icon("plus")}Move set</button></div></div>`;
   }
   if (d.log.length) {
     html += `<div class="card"><details><summary>Activity</summary><div class="log">${esc(d.log.join("\n"))}</div></details></div>`;
@@ -522,6 +523,7 @@ function wireDetail(d) {
   on("#btn-pl", () => act(() => api("/api/open", { project: p, id: d.id, what: "pixelliner" }), "Opening in PixelLiner"));
   on("#btn-folder", () => act(() => api("/api/open", { project: p, id: d.id, what: "folder" })));
   on("#btn-new-anim", () => sheetNewAnimation(d));
+  on("#btn-move-set", () => sheetMoveSet(d));
   on("#btn-more", (e) => openMenu(e.currentTarget, itemMenu(d)));
   document.querySelectorAll("[data-version]").forEach((b) => b.onclick = () => {
     const v = Number(b.dataset.version);
@@ -746,6 +748,31 @@ function sheetNewAnimation(d) {
       const r = await act(() => api("/api/animations", { project: project(), character: d.id, prompt,
         name: $("#na-name").value.trim(), frames: segmentedValue($("#na-f")) || null }), "Planning the animation");
       if (r) { closeSheet(); location.hash = `#/item/${encodeURIComponent(r.id)}`; }
+    };
+  });
+}
+
+function sheetMoveSet(d) {
+  const moves = [["idle", "Idle", 4], ["walk", "Walk", 6], ["run", "Run", 6], ["jump", "Jump", 6], ["attack", "Attack", 5], ["hurt", "Hurt", 3]];
+  openSheet(`<h2>Move set</h2><p class="sub">The usual moves of a side-scrolling game character, for ${esc(d.name)}. Each one is its own animation: you'll approve its poses before it is finished.</p>
+    <div class="field"><span class="label">Moves</span><div class="chips" id="ms-moves">${moves.map(([v, l, f]) =>
+      `<button class="chip" data-v="${v}" data-f="${f}" aria-pressed="true">${l} · ${f}</button>`).join("")}</div></div>
+    <div class="actions"><span class="estimate" id="ms-est"></span><button class="btn" data-close>Cancel</button><button class="btn primary" id="ms-go">Create animations</button></div>`, (s) => {
+    const picked = () => [...s.querySelectorAll("#ms-moves .chip[aria-pressed=true]")];
+    const est = () => {
+      const p = picked();
+      $("#ms-est").textContent = p.length ? estimateText(p.reduce((t, b) => t + animationEstimate(b.dataset.f), 0)) : "Pick at least one move";
+      $("#ms-go").disabled = !p.length;
+    };
+    s.querySelectorAll("#ms-moves .chip").forEach((b) => b.onclick = () => {
+      b.setAttribute("aria-pressed", b.getAttribute("aria-pressed") === "true" ? "false" : "true"); est();
+    });
+    est();
+    s.querySelector("[data-close]").onclick = closeSheet;
+    $("#ms-go").onclick = async () => {
+      const r = await act(() => api("/api/movesets", { project: project(), character: d.id, moves: picked().map((b) => b.dataset.v) }),
+        "Planning the animations");
+      if (r) { closeSheet(); toast(`${r.ids.length} animations started: approve each one's poses when they are ready`); }
     };
   });
 }

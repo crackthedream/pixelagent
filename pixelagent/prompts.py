@@ -194,8 +194,13 @@ sprite for the design). Keep each frame's face clearly visible and the same size
 
 # the pose sheet for the native finish: every frame drawn as pixel art on one shared block grid, read back per frame
 POSE_SHEET_PIXEL = """
-Style: draw every frame as an authentic hand-pixelled sprite exactly like the FIRST reference image (the character's
-pixel-art sprite): the same design, palette, proportions and pixel style. Each sprite is about {height} pixels tall;
+Layout: the FIRST reference image is the layout -- the character's finished sprite placed {n} times at its exact final
+size and pixel scale, evenly spaced on one ground line. Redraw each copy, left to right, in its frame's pose: at the
+SAME size and pixel scale (an upright pose exactly as tall as the layout's figure, never bigger), in the same place
+on the same ground line, keeping the empty space between the figures. The SECOND reference image is the same sprite
+alone, enlarged the same way.
+Style: draw every frame as an authentic hand-pixelled sprite exactly like that sprite: the same design, palette,
+proportions and pixel style. Each sprite is about {height} pixels tall;
 show the sheet enlarged so that every sprite pixel is a crisp, perfectly square block of exactly {block}x{block}
 image pixels, on ONE regular grid shared by all frames (nearest-neighbour: no smoothing, no blur). Do NOT draw grid
 lines or pixel borders. Clean clusters of flat tones, no gradients, no dithering, no dark outline around the figure;

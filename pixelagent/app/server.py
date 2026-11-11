@@ -467,6 +467,39 @@ def create_character(settings, body):
     return {"id": aid}
 
 
+# a side-scrolling character's usual moves (Alice in Cradle-style action games): name -> (motion, frames)
+MOVES = {
+    "idle": ("4-frame idle, loops: gentle breathing, the body rises and falls by one pixel, the hair sways slightly", 4),
+    "walk": ("6-frame walk cycle in place, loops, side view facing right", 6),
+    "run": ("6-frame run cycle in place, loops, side view facing right, leaning forward, longer strides", 6),
+    "jump": ("6-frame jump, plays once, side view facing right: crouch, take off, rise, peak, fall, land", 6),
+    "attack": ("5-frame attack, plays once, side view facing right: wind up, strike, follow through, recover", 5),
+    "hurt": ("3-frame hurt reaction, plays once: flinch and recoil backwards, then recover", 3),
+}
+
+
+def create_move_set(settings, body):
+    """Several animations of one character at once (each still stops for its poses to be approved)."""
+    pid, char = body["project"], body["character"]
+    moves = body.get("moves") or list(MOVES)
+    unknown = [m for m in moves if m not in MOVES]
+    if unknown:
+        raise ValueError(f"unknown move: {', '.join(map(str, unknown))}")
+    spend_check(settings, pid)
+    proj = Project(project_path(settings, pid), overrides(settings))
+    a = proj.asset(char)
+    if a.state.inputs.get("kind") == "animation":
+        raise ValueError("a move set is made for a character, not for an animation")
+    ids = []
+    for m in dict.fromkeys(moves):
+        prompt, frames = MOVES[m]
+        aid = unique_id(proj, f"{char}-{m}")
+        proj.new_asset(aid, {"kind": "animation", "character": char, "anim": m, "prompt": prompt, "frames": frames})
+        start_run(settings, pid, aid)
+        ids.append(aid)
+    return {"ids": ids}
+
+
 def create_animation(settings, body):
     pid = body["project"]
     spend_check(settings, pid)
@@ -878,6 +911,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(create_character(s, body))
             if u.path == "/api/animations":
                 return self._json(create_animation(s, body))
+            if u.path == "/api/movesets":
+                return self._json(create_move_set(s, body))
             if u.path == "/api/decide":
                 return self._json(decide(s, body))
             if u.path == "/api/run":

@@ -346,3 +346,22 @@ drawn strands, each eye a distinct pixel shape. The reduce finish gives a soft b
 - **Result:** on eight sprites, medium moves mean chroma 0.063 -> 0.041 and dark pixels 32% -> 28%. The owner picked
   medium over soft and strong (strong greys the skin and reds). ref05 through the pipeline: chroma 0.078 -> 0.051,
   dark 43.6% -> 28.2%, still 37 colours. Animations inherit it: their frames map to the character's palette.
+
+**Move set** (2026-11-11, the app's Move set; `server.MOVES`, `benchmarks/move_set.py`, `bench_runs_moves*`):
+- **What it is:** idle (4 frames), walk (6), run (6), jump (6), attack (5) and hurt (3), each its own animation that
+  stops for its poses to be approved. About $0.064-0.071 a move; $0.40 for all six.
+- **First run** (ref05 after the palette grade): good poses, but sizes all over the place. Idle came out 1.34x the
+  character, walk 1.25x and run "0.79x"; the size fix's believability cap left them alone. The run figures were
+  drawn large and crowded, so the figure boxes cut them apart (pieces of neighbours in the frames).
+- **Cause:** the pixel prompt called the first reference image "the character's pixel-art sprite", but the code
+  passed the concept first. The model had no size anchor and filled the room it had.
+- **Fixes:**
+  - **Layout reference** (`anim.layout_sheet`): the first image is the finished sprite placed once per frame at
+    the final pixel scale, evenly spaced on one ground line. The model redraws each copy in its pose. Idle, walk and
+    run came back at 148-151, 143-146 and 122-133 px against a 148-px character, with clean gaps. Each costs the
+    same as before.
+  - **Frame cleanup** (`anim.clean_frame`): neighbour pieces entering at the crop's edge and far specks are
+    dropped.
+  - **Size fix:** it now only SHRINKS frames drawn too big (up to 1.4x), measured on the taller, upright half of
+    the frames. Shorter readings are the pose itself: a run's tallest frames still lean, and enlarging them by 11%
+    made the runner bigger than the character.

@@ -9,6 +9,8 @@ benchmarks/
   refs/                  your reference images (your own art or licensed material)
   ratings.csv            your 1-10 ratings per case and milestone run
   make_synthetic.py      writes synthetic stand-in references for dry runs (refs/synthetic_*.png)
+  move_set.py            a character's move set (idle, walk, run, jump, attack, hurt) in parallel, with costs and
+                         frame heights (~$0.07 a move)
 ```
 
 ## To fill in before M1
