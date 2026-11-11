@@ -50,6 +50,14 @@ input_fidelity = ""          # "high" for edit models that support it (gpt-image
 min_iou = 0.85               # map silhouette must overlap the concept silhouette this well
 max_unknown = 0.15           # max share of concept pixels whose map colour matches no key
 
+[scene]
+height = 540                 # a backdrop layer's height in pixels at the characters' 1x scale (one screen)
+quality = "medium"           # image quality for scene layers and seam repaints
+min_repeat = 0.75            # a layer is cut to repeat at no less than this share of the screen's width
+seam_blend = 32              # columns dithered from the layer's continuation into its start where it repeats
+sky_blend = 96               # the same for the sky (no detail to ghost, so a wider, gentler blend)
+seam_limit = 30.0            # a cut whose ends still differ more than this is flagged (the blend may show a ghost)
+
 [concept]
 refine_after_pick = false    # true: after gate B, polish the picked draft with images.edit on image_final
 heads_range = [4.0, 5.0]     # soft look: a concept whose reduced figure is outside this many heads tall is redone

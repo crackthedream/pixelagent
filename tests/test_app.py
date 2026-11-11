@@ -380,6 +380,28 @@ class AppServerTest(unittest.TestCase):
         empty = self.new_project("No items")
         self.assertEqual(self.post("/api/itemsheet", {"project": empty})[0], 400)
 
+    def test_scenes_stop_for_approval_with_a_parallax_preview(self):
+        pid = self.new_project("Places")
+        self.assertEqual(self.post("/api/scenes", {"project": pid, "prompt": ""})[0], 400)
+        sid = self.ok(self.post("/api/scenes", {"project": pid, "prompt": "a forest at dusk", "name": "Dusk"}))["id"]
+        d = self.wait_idle(pid, sid)
+        self.assertEqual((d["kind"], d["gate_detail"]["kind"]), ("scene", "scene"))
+        g = d["gate_detail"]
+        self.assertTrue(g["image"].endswith(".gif"), g["image"])
+        self.assertEqual([l["name"] for l in g["layers"]], ["sky", "far", "mid", "near"])
+        self.assertEqual(g["layers"][0]["scroll"], 0.05)
+        d = self.drive(pid, sid)
+        self.assertEqual(d["status"], "complete")
+        self.assertEqual(d["name"], "Dusk")
+        keys = {e["key"]: e["label"] for e in d["exports"]}
+        self.assertEqual(keys["godot"], "Godot scene (.tscn)")
+        self.assertEqual(keys["png"], "Backdrop (PNG)")
+        items = self.ok(self.get(f"/api/assets?project={pid}"))["items"]
+        self.assertEqual([i["kind"] for i in items if i["id"] == sid], ["scene"])
+        self.assertTrue(next(i for i in items if i["id"] == sid)["thumb"])
+        self.assertEqual(self.post("/api/expressions", {"project": pid, "id": sid})[0], 400)
+        self.assertIn("scene", self.ok(self.get("/api/overview"))["estimates"])
+
     def test_rename_duplicate_and_delete_items(self):
         pid = self.new_project("Manage")
         proj = Project(os.path.join(self.projects, pid))

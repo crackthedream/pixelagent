@@ -714,7 +714,8 @@ app sheet ("New object", "New background") and benchmark.
    character steps; the work is object-aware material labels, the size rules,
    skipping the face pass and animation, and an "item sheet" export. Done when three benchmark props (for
    example a weapon, a chest, a potion) export cleanly from a prompt.
-8. **Backgrounds/scenes:** design in `docs/BACKGROUNDS_DESIGN.md` (a scenery backdrop and a theme kit, after how
+8. **Backgrounds/scenes:** the scenery backdrop is done (Scenes library, `pixelagent/steps/scene.py`; three
+   benchmark scenes, ~$0.25 each). Next: the walkable kit (32-px tiles, LDtk/Tiled/Godot tilesets). Design in `docs/BACKGROUNDS_DESIGN.md` (a scenery backdrop and a theme kit, after how
    Alice in Cradle assembles stages from chip sets). Originally sketched as a new pipeline (layout plan → per-layer concepts → per-layer conversion → targeted
    artist passes → seam and layer checks → layered export). Start with a short design doc and 3 benchmark
    prompts (forest, town street, cave) before code.

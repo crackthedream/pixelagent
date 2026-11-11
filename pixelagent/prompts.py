@@ -117,6 +117,33 @@ LOCATE_FACE = """This is a pixel-art game character shown enlarged. Give the tig
 eyes, the brows and the mouth (not the whole head, not the hair), as fractions 0-1 of the image width and height.
 found=false when the face cannot be seen."""
 
+# scene backdrops (pixelagent/steps/scene.py)
+SCENE_PLAN = """Plan a parallax backdrop for a 2D side-scrolling pixel-art action game (the look of modern hand-made
+pixel-art platformers such as Alice in Cradle) from the request below. Give 3-5 layers from far to near: first the
+sky (opaque, the whole image), then far, middle and near layers. Each layer: a short name, what it shows concretely
+(shapes, objects, where they sit on the screen), its depth (0 = sky .. 1 = nearest) and a colour budget (12-16 for
+far layers, 24-40 for near ones). The near layer frames the play area (foreground plants, posts, rocks along the
+bottom or the sides) without covering the middle of the screen, where the characters walk. One horizon, one light
+and one palette shared by every layer; a light, slightly muted palette."""
+
+SCENE_LAYER = """One layer of a parallax backdrop for a 2D side-scrolling pixel-art action game. Scene: {summary}.
+Light: {light}. Palette (shared by every layer): {palette}. The horizon is at {horizon}% of the image height.
+Draw ONLY the "{name}" layer: {content}. Distance: {distance}.
+A wide side view that continues to the left and right (no frame, nothing cut off at the sides). Hand-pixelled style
+like modern pixel-art action platformers: very small crisp pixels, clean flat tone clusters, no gradients, no blur,
+no text, no characters, no UI.{fill}"""
+
+SCENE_SKY = """
+This layer fills the WHOLE image: the sky with its light, clouds and atmosphere, nothing in front of it. It must
+REPEAT sideways: its colours change only from top to bottom, never from left to right (no sun or glow on one side),
+and no cloud touches the left or right edge."""
+
+SCENE_TRANSPARENT = """
+Everything that is not part of this layer is fully transparent (no sky, no background colour, no other layers):
+the layer's shapes stand alone and are fully opaque. It must REPEAT sideways: leave a clear, empty gap at both the
+left and the right edge (no tree, house or object touches the sides); only a ground strip along the bottom may run
+from edge to edge, as an even, repeating texture."""
+
 # an expression of a finished pixel-art character: a masked edit of its pixel-art concept, the face only
 EXPRESSION = """Edit this pixel-art character sprite: change ONLY the facial expression, inside the transparent area of
 the mask, to {expression}. It is hand-pixelled art shown enlarged: keep exactly the same block size and grid, crisp

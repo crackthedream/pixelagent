@@ -63,7 +63,7 @@ async function loadItems() {
   state.items = (await api(`/api/assets?project=${encodeURIComponent(project())}`)).items;
   // same rule as the "Needs you" filter: waiting at a gate, paused, or stopped
   const wait = (k) => state.items.filter((i) => i.kind === k && !i.running && (i.gate || i.paused || i.failed)).length;
-  for (const [k, id] of [["character", "badge-characters"], ["object", "badge-objects"], ["animation", "badge-animations"]]) {
+  for (const [k, id] of [["character", "badge-characters"], ["object", "badge-objects"], ["scene", "badge-scenes"], ["animation", "badge-animations"]]) {
     const n = wait(k);
     const b = $("#" + id);
     b.hidden = !n;
@@ -160,7 +160,7 @@ async function render(fromRefresh) {
   if (r.view === "item" && r.id) return renderDetail(r.id, fromRefresh);
   if (!fromRefresh) await loadItems();
   sessionStorage.setItem("from", r.view);
-  return renderLibrary(r.view === "animations" ? "animation" : r.view === "objects" ? "object" : "character");
+  return renderLibrary({ animations: "animation", objects: "object", scenes: "scene" }[r.view] || "character");
 }
 
 function setToolbar(html) {
@@ -205,7 +205,7 @@ window.fitPixel = fitPixel;
 window.addEventListener("resize", () => document.querySelectorAll("img.px").forEach((i) => fitPixel(i)));
 
 function renderLibrary(kind) {
-  const plural = kind === "animation" ? "Animations" : kind === "object" ? "Objects" : "Characters";
+  const plural = { animation: "Animations", object: "Objects", scene: "Scenes" }[kind] || "Characters";
   const filter = sessionStorage.getItem("filter-" + kind) || "all";
   setToolbar(`
     <div class="title">${esc(project())}</div><div class="spacer"></div>
@@ -214,12 +214,13 @@ function renderLibrary(kind) {
         `<button data-filter="${v}" aria-pressed="${filter === v}">${l}</button>`).join("")}
     </div>
     ${kind === "character" ? `<button class="btn primary round" id="btn-new">${icon("plus")}New character</button>`
+      : kind === "scene" ? `<button class="btn primary round" id="btn-new">${icon("plus")}New scene</button>`
       : kind === "object" ? `${state.items.some((i) => i.kind === "object" && i.status === "complete")
         ? `<button class="btn round" id="btn-sheet" title="Every finished object in one atlas, for a game engine">${icon("export")}Item sheet</button>` : ""}
         <button class="btn primary round" id="btn-new">${icon("plus")}New object</button>` : ""}`);
   document.querySelectorAll("[data-filter]").forEach((b) => b.onclick = () => { sessionStorage.setItem("filter-" + kind, b.dataset.filter); render(); });
   const nb = $("#btn-new");
-  if (nb) nb.onclick = () => (kind === "object" ? sheetNewObject() : sheetNewCharacter());
+  if (nb) nb.onclick = () => (kind === "object" ? sheetNewObject() : kind === "scene" ? sheetNewScene() : sheetNewCharacter());
   const sb = $("#btn-sheet");
   if (sb) sb.onclick = async () => {
     const r = await act(() => api("/api/itemsheet", { project: project() }));
@@ -238,7 +239,10 @@ function renderLibrary(kind) {
 
   const c = $("#content");
   if (!all) {
-    c.innerHTML = kind === "object" ? emptyState("box", "No objects yet",
+    c.innerHTML = kind === "scene" ? emptyState("mountain", "No scenes yet",
+      "Describe a place: a forest at dusk, a town street, a crystal cave. It becomes parallax layers in pixel art at your characters' scale.",
+      `<button class="btn primary lg round" id="empty-new">${icon("plus")}New scene</button>`)
+      : kind === "object" ? emptyState("box", "No objects yet",
       "Describe an item or a prop, or drop in a reference image: a potion, a sword, a chest. It is drawn as pixel art at its game size.",
       `<button class="btn primary lg round" id="empty-new">${icon("plus")}New object</button>`)
       : kind === "character" ? emptyState("person", "No characters yet",
@@ -246,7 +250,7 @@ function renderLibrary(kind) {
       `<button class="btn primary lg round" id="empty-new">${icon("plus")}New character</button>`)
       : emptyState("film", "No animations yet", "Open a finished character and choose New animation. Describe the motion in your own words.", "");
     const en = $("#empty-new");
-    if (en) en.onclick = () => (kind === "object" ? sheetNewObject() : sheetNewCharacter());
+    if (en) en.onclick = () => (kind === "object" ? sheetNewObject() : kind === "scene" ? sheetNewScene() : sheetNewCharacter());
     return;
   }
   c.innerHTML = `${spendBanner()}
@@ -294,10 +298,10 @@ async function renderDetail(id, fromRefresh) {
   state.detailSig = sig;
   if (d.live) await new Promise((res) => { const im = new Image(); im.onload = im.onerror = res; im.src = d.live.url; });
 
-  const from = d.kind === "animation" ? "animations" : d.kind === "object" ? "objects" : "characters";
+  const from = { animation: "animations", object: "objects", scene: "scenes" }[d.kind] || "characters";
   sessionStorage.setItem("from", from);
   renderSidebar();
-  const backLabel = d.kind === "animation" ? "Animations" : d.kind === "object" ? "Objects" : "Characters";
+  const backLabel = { animation: "Animations", object: "Objects", scene: "Scenes" }[d.kind] || "Characters";
   setToolbar(`<div class="title">${esc(d.name)}</div><div class="spacer"></div>
     ${d.failed || d.job_error ? `<button class="btn" id="btn-retry">${icon("retry")}Try again</button>` : ""}
     ${d.exports ? `<button class="btn" id="btn-folder">${icon("folder")}Show in folder</button>
@@ -308,7 +312,7 @@ async function renderDetail(id, fromRefresh) {
   const viewing = !d.running && state.viewVersion !== null
     ? (d.versions.items.find((v) => v.version === state.viewVersion && !v.current) || null) : null;
   const heroUrl = viewing ? viewing.url
-    : d.kind === "animation" && gd && (gd.id === "R" || gd.id === "P") ? gd.image
+    : (d.kind === "animation" && gd && (gd.id === "R" || gd.id === "P")) || (d.kind === "scene" && gd && gd.id === "S") ? gd.image
     : gd && gd.candidates && state.pick !== null && gd.candidates[state.pick] ? gd.candidates[state.pick]
     : d.live ? d.live.url : d.hero;
   $("#content").innerHTML = `${spendBanner()}
@@ -502,6 +506,15 @@ function decisionPanel(d) {
       ${noteRow("Not right? For example: longer strides", "New poses")}
       <div class="decision-actions"><div class="spacer"></div><button class="btn primary lg" id="btn-approve">Approve and draw frames</button></div></div>`;
   }
+  if (g.kind === "scene") {
+    const seams = (g.seams || []).filter((s) => s.visible).map((s) => s.layer);
+    return `<div class="decision">${head("Approve the backdrop", "It scrolls above as a game camera would see it; each layer is shown below, far to near.")}
+      <div class="frame-row" style="--n:${Math.min((g.layers || []).length, 5)}">${(g.layers || []).map((l) => `<figure><span class="stage">${stageImg(l.url, l.name)}</span>
+        <figcaption>${esc(l.name)}${l.scroll != null ? ` <span class="ms">scroll ${l.scroll}</span>` : ""}</figcaption></figure>`).join("")}</div>
+      ${seams.length ? `<p class="muted small">These layers may show a seam where they repeat: ${seams.map(esc).join(", ")}. Redrawing them can help.</p>` : ""}
+      ${noteRow("What should change? For example: fewer trees in front, a warmer sky", "Redraw layers")}
+      <div class="decision-actions"><div class="spacer"></div><button class="btn primary lg" id="btn-approve">Approve and export</button></div></div>`;
+  }
   if (g.kind === "animation") {
     return `<div class="decision">${head("Approve the animation", "It plays above; every frame is shown below.")}
       ${g.frames && g.frames.length
@@ -681,6 +694,25 @@ function sheetNewProject() {
     };
     $("#pc").onclick = go;
     $("#pn").onkeydown = (e) => { if (e.key === "Enter") go(); };
+  });
+}
+
+function sheetNewScene() {
+  openSheet(`<h2>New scene</h2><p class="sub">A backdrop of parallax layers (sky, far, middle, near) in pixel art at your characters' scale, repeating sideways. You'll approve it with a scrolling preview.</p>
+    <div class="stack">
+      <div class="field"><label for="ns-prompt">The place</label>
+        <textarea class="textarea" id="ns-prompt" placeholder="A forest at dusk: tall old trees, soft orange light from the left, fireflies over a mossy path."></textarea></div>
+      <div class="field"><label for="ns-name">Name</label><input class="input" id="ns-name" placeholder="Optional"></div>
+    </div>
+    <div class="actions"><span class="estimate" id="ns-est"></span><button class="btn" data-close>Cancel</button><button class="btn primary" id="ns-go">Create scene</button></div>`, (s) => {
+    $("#ns-est").textContent = estimateText(state.overview.estimates.scene || 0.35);
+    s.querySelector("[data-close]").onclick = closeSheet;
+    $("#ns-go").onclick = async () => {
+      const prompt = $("#ns-prompt").value.trim();
+      if (!prompt) return toast("Describe the place first", true);
+      const r = await act(() => api("/api/scenes", { project: project(), prompt, name: $("#ns-name").value.trim() }), "Planning your scene");
+      if (r) { closeSheet(); location.hash = `#/item/${encodeURIComponent(r.id)}`; }
+    };
   });
 }
 
@@ -1085,7 +1117,7 @@ function alertDeleteItem(it) {
     onConfirm: async () => {
       const r = await act(() => api("/api/item/delete", { project: project(), id: it.id, with_animations: anims.length > 0 }),
         "Moved to Recently Deleted");
-      if (r && route().view === "item") location.hash = `#/${it.kind === "animation" ? "animations" : it.kind === "object" ? "objects" : "characters"}`;
+      if (r && route().view === "item") location.hash = `#/${{ animation: "animations", object: "objects", scene: "scenes" }[it.kind] || "characters"}`;
     },
   });
 }
@@ -1114,7 +1146,8 @@ function deletedWhen(t) {
 
 function deletedLabel(e) {
   if (e.kind === "project") return `Project, ${e.items || 0} item${e.items === 1 ? "" : "s"}`;
-  const what = e.item_kind === "animation" ? `Animation${e.character_name ? ` of ${e.character_name}` : ""}` : "Character";
+  const what = e.item_kind === "animation" ? `Animation${e.character_name ? ` of ${e.character_name}` : ""}`
+    : { object: "Object", scene: "Scene" }[e.item_kind] || "Character";
   const anims = e.animations ? ` and ${e.animations} animation${e.animations === 1 ? "" : "s"}` : "";
   return `${what}${anims}, in ${e.project}`;
 }

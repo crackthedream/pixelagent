@@ -140,3 +140,33 @@ contrast falling with distance. Cost for all three backdrops and kits is about *
 Not tested yet: separate layers drawn to fit together (the spike drew one full scene and one far layer
 independently), colour keying when transparency fails, and a kit sheet.
 Next step: build the backdrop (section 3A) on these three results.
+
+## 8. The backdrop, built (2026-11-11, `pixelagent/steps/scene.py`, `bench_runs_scenes/`)
+
+- **Steps:** plan → layers → seams → pixel art → gate S (a scrolling preview with the project's first character in
+  front) → export. Export covers layer PNGs, a composite, meta.json, a Godot ParallaxBackground `.tscn`, a Tiled
+  `.tmx` with parallax image layers, a Unity parallax script and a README. LDtk has no parallax image layers, so the
+  README explains how to use the PNGs there; a real LDtk export comes with the kit (tilesets).
+- **Layers are drawn from text, not as edits of the layers behind:** an edit would keep the input and redraw it
+  into the new layer.
+- **The seam repaint was dropped.** On transparent layers it left opaque blocks (a dark bar over the street's sky,
+  a pale block in the forest) and a lighter stripe in skies. The seam numbers missed this because they compare only
+  the outer edges.
+- **The replacement:**
+  - **Prompts:** each layer is asked to repeat sideways. The sky's colours vary only from top to bottom, with no
+    clouds at the side edges; the other layers keep a clear gap at both side edges, and only a ground strip runs
+    edge to edge.
+  - **Cut:** each layer is cut where its pixel-art reading repeats best (`best_wrap`). It keeps its full width
+    when that already repeats.
+  - **Blend:** a 32-column ordered-dither blend at the join (96 for skies). It takes whole pixels from either
+    side, so it adds no colours.
+- **Results:** three prompts (forest at dusk, town street by day, crystal cave), $1.28 in all including the first
+  round and the redraws; about $0.20-0.28 a scene. With the repeat prompts every join is within 3.5 (mean colour
+  difference across the wrap), and most layers repeat at full width.
+  - The forest frames a clear path with big trees at both sides.
+  - The street is a row of half-timbered houses with flower boxes and awnings.
+  - The cave has crystals, a still pool and stalactites.
+- **Known limits:**
+  - near layers sometimes have flat-topped trunks (the "keep to the edges" rule cuts them);
+  - a pale rock slab in the cave looks washed out;
+  - the preview's character stands at a fixed height, not on the scene's ground.

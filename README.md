@@ -163,6 +163,19 @@ every finished object of the project in one atlas of uniform square cells (centr
 TexturePacker JSON (trimmed rectangles, cells, a bottom-centre pivot), a Godot 4 AtlasTexture per item, the single
 PNGs and a README. Free.
 
+## Scenes (parallax backdrops)
+A scene is its own asset (the app's Scenes library and New scene). From a description of a place, the director
+plans 3-5 layers, far to near: an opaque sky, then far, middle and near layers on transparency, sharing one horizon,
+light and palette. The image model draws each layer on its own, asked to repeat sideways: no left-right change in the
+sky, and a clear gap at the side edges of the other layers.
+
+Each layer is read as pixel art at the characters' 1x scale: 540 px high, about 1.9 image pixels per pixel, alpha
+made binary, colours cut per layer and graded. It is cut where it repeats best (a gap in a treeline, two alike
+stretches of sky), with a short ordered-dither blend at the join, so it scrolls without a seam. A scrolling preview,
+with the project's first character standing in front, waits for approval (gate S). Export: layer PNGs, a composite,
+a Godot ParallaxBackground scene, a Tiled map with parallax image layers, a Unity parallax script and a README.
+About $0.25 a scene. Design and measurements: `docs/BACKGROUNDS_DESIGN.md`.
+
 ## Game pack
 `python -m pixelagent --project P pack CHARACTER` (or Save next to "Game pack" in the app's Exports card) writes
 `assets/CHARACTER/game_pack/` and a zip of it. It holds one atlas with uniform cells, where the standing sprite,

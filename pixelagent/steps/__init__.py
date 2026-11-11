@@ -1,6 +1,7 @@
 """The ordered pipeline. Each step module exposes run(ctx) (and optionally after_gate(ctx, decision))."""
 from ..pipeline import Step
-from . import anim, artist_step, build, concept, critique, detail, export, intake, later, materials, matmap, pixelize
+from . import (anim, artist_step, build, concept, critique, detail, export, intake, later, materials, matmap, pixelize,
+               scene)
 
 STEPS = [
     Step(1, "intake", intake.run, gate="A", gate_title="confirm or edit the spec"),
@@ -29,4 +30,15 @@ ANIM_STEPS = [
     Step(5, "anim_review", anim.review, gate="R", gate_title="approve the animation (reject with a note to redraw)",
          redo_from="anim_draw"),
     Step(6, "anim_export", anim.export),
+]
+
+# A scene backdrop: parallax layers made from the user's prompt (docs/BACKGROUNDS_DESIGN.md).
+SCENE_STEPS = [
+    Step(1, "scene_plan", scene.plan),
+    Step(2, "scene_layers", scene.layers),
+    Step(3, "scene_seams", scene.seams),
+    Step(4, "scene_pixel", scene.pixel),
+    Step(5, "scene_review", scene.review, gate="S", gate_title="approve the backdrop (reject with a note to redraw)",
+         redo_from="scene_layers"),
+    Step(6, "scene_export", scene.export),
 ]

@@ -91,7 +91,7 @@ class Ctx:
 
 def build_steps(kind="character"):
     from . import steps
-    return steps.ANIM_STEPS if kind == "animation" else steps.STEPS
+    return {"animation": steps.ANIM_STEPS, "scene": steps.SCENE_STEPS}.get(kind, steps.STEPS)
 
 
 class Pipeline:
