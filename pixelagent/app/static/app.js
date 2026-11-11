@@ -63,7 +63,7 @@ async function loadItems() {
   state.items = (await api(`/api/assets?project=${encodeURIComponent(project())}`)).items;
   // same rule as the "Needs you" filter: waiting at a gate, paused, or stopped
   const wait = (k) => state.items.filter((i) => i.kind === k && !i.running && (i.gate || i.paused || i.failed)).length;
-  for (const [k, id] of [["character", "badge-characters"], ["animation", "badge-animations"]]) {
+  for (const [k, id] of [["character", "badge-characters"], ["object", "badge-objects"], ["animation", "badge-animations"]]) {
     const n = wait(k);
     const b = $("#" + id);
     b.hidden = !n;
@@ -160,7 +160,7 @@ async function render(fromRefresh) {
   if (r.view === "item" && r.id) return renderDetail(r.id, fromRefresh);
   if (!fromRefresh) await loadItems();
   sessionStorage.setItem("from", r.view);
-  return renderLibrary(r.view === "animations" ? "animation" : "character");
+  return renderLibrary(r.view === "animations" ? "animation" : r.view === "objects" ? "object" : "character");
 }
 
 function setToolbar(html) {
@@ -205,7 +205,7 @@ window.fitPixel = fitPixel;
 window.addEventListener("resize", () => document.querySelectorAll("img.px").forEach((i) => fitPixel(i)));
 
 function renderLibrary(kind) {
-  const plural = kind === "animation" ? "Animations" : "Characters";
+  const plural = kind === "animation" ? "Animations" : kind === "object" ? "Objects" : "Characters";
   const filter = sessionStorage.getItem("filter-" + kind) || "all";
   setToolbar(`
     <div class="title">${esc(project())}</div><div class="spacer"></div>
@@ -213,10 +213,11 @@ function renderLibrary(kind) {
       ${[["all", "All"], ["needs", "Needs you"], ["working", "Working"], ["ready", "Ready"]].map(([v, l]) =>
         `<button data-filter="${v}" aria-pressed="${filter === v}">${l}</button>`).join("")}
     </div>
-    ${kind === "character" ? `<button class="btn primary round" id="btn-new">${icon("plus")}New character</button>` : ""}`);
+    ${kind === "character" ? `<button class="btn primary round" id="btn-new">${icon("plus")}New character</button>`
+      : kind === "object" ? `<button class="btn primary round" id="btn-new">${icon("plus")}New object</button>` : ""}`);
   document.querySelectorAll("[data-filter]").forEach((b) => b.onclick = () => { sessionStorage.setItem("filter-" + kind, b.dataset.filter); render(); });
   const nb = $("#btn-new");
-  if (nb) nb.onclick = () => sheetNewCharacter();
+  if (nb) nb.onclick = () => (kind === "object" ? sheetNewObject() : sheetNewCharacter());
 
   let items = state.items.filter((i) => i.kind === kind);
   const all = items.length;
@@ -226,12 +227,15 @@ function renderLibrary(kind) {
 
   const c = $("#content");
   if (!all) {
-    c.innerHTML = kind === "character" ? emptyState("person", "No characters yet",
+    c.innerHTML = kind === "object" ? emptyState("box", "No objects yet",
+      "Describe an item or a prop, or drop in a reference image: a potion, a sword, a chest. It is drawn as pixel art at its game size.",
+      `<button class="btn primary lg round" id="empty-new">${icon("plus")}New object</button>`)
+      : kind === "character" ? emptyState("person", "No characters yet",
       "Describe a character or drop in a reference image. You'll check the plan, pick a concept and approve the sprite along the way.",
       `<button class="btn primary lg round" id="empty-new">${icon("plus")}New character</button>`)
       : emptyState("film", "No animations yet", "Open a finished character and choose New animation. Describe the motion in your own words.", "");
     const en = $("#empty-new");
-    if (en) en.onclick = () => sheetNewCharacter();
+    if (en) en.onclick = () => (kind === "object" ? sheetNewObject() : sheetNewCharacter());
     return;
   }
   c.innerHTML = `${spendBanner()}
@@ -279,10 +283,10 @@ async function renderDetail(id, fromRefresh) {
   state.detailSig = sig;
   if (d.live) await new Promise((res) => { const im = new Image(); im.onload = im.onerror = res; im.src = d.live.url; });
 
-  const from = d.kind === "animation" ? "animations" : "characters";
+  const from = d.kind === "animation" ? "animations" : d.kind === "object" ? "objects" : "characters";
   sessionStorage.setItem("from", from);
   renderSidebar();
-  const backLabel = d.kind === "animation" ? "Animations" : "Characters";
+  const backLabel = d.kind === "animation" ? "Animations" : d.kind === "object" ? "Objects" : "Characters";
   setToolbar(`<div class="title">${esc(d.name)}</div><div class="spacer"></div>
     ${d.failed || d.job_error ? `<button class="btn" id="btn-retry">${icon("retry")}Try again</button>` : ""}
     ${d.exports ? `<button class="btn" id="btn-folder">${icon("folder")}Show in folder</button>
@@ -401,9 +405,9 @@ function inspector(d) {
   if (d.exports) {
     html += `<div class="card"><h2>Exports</h2><div class="list">${d.exports.filter((e) => e.url).map((e) => `
       <div class="row"><span class="grow">${esc(e.label)}</span><a href="${esc(e.url)}" download>Save</a></div>`).join("")}
-      ${d.kind !== "animation" ? `<div class="row"><span class="grow">Game pack (ZIP)<div class="muted small">Atlas with every animation and face, for Godot, Unity, Aseprite JSON</div></span><button class="btn" id="btn-pack">Save</button></div>` : ""}</div></div>`;
+      ${d.kind === "character" ? `<div class="row"><span class="grow">Game pack (ZIP)<div class="muted small">Atlas with every animation and face, for Godot, Unity, Aseprite JSON</div></span><button class="btn" id="btn-pack">Save</button></div>` : ""}</div></div>`;
   }
-  if (d.kind !== "animation" && d.status === "complete") {
+  if (d.kind === "character" && d.status === "complete") {
     const anims = state.items.filter((i) => i.kind === "animation" && i.character === d.id);
     html += `<div class="card"><h2>Animations</h2>
       ${anims.length ? `<div class="list">${anims.map((a) => `
@@ -412,7 +416,7 @@ function inspector(d) {
       <div class="row-actions" style="margin-top:8px"><button class="btn" id="btn-new-anim">${icon("plus")}New animation</button>
         <button class="btn" id="btn-move-set">${icon("plus")}Move set</button></div></div>`;
   }
-  if (d.kind !== "animation" && d.status === "complete") {
+  if (d.kind === "character" && d.status === "complete") {
     const ex = d.expressions || [];
     html += `<div class="card"><h2>Expressions</h2>
       ${ex.length ? `<div class="expr-grid">${ex.map((e) => `<figure class="expr"><a class="stage" href="${esc(e.x4)}" target="_blank" rel="noopener" title="Open the whole sprite at 4×">${stageImg(e.face, e.name)}</a>
@@ -666,6 +670,68 @@ function sheetNewProject() {
     };
     $("#pc").onclick = go;
     $("#pn").onkeydown = (e) => { if (e.key === "Enter") go(); };
+  });
+}
+
+function sheetNewObject() {
+  let reference = null;
+  openSheet(`<h2>New object</h2><p class="sub">An item or a prop, drawn as pixel art at its game size. You'll confirm the plan and pick a drawing first.</p>
+    <div class="stack">
+      <div class="segmented" id="no-mode" role="group" aria-label="Start from">
+        <button data-v="text" aria-pressed="true">${icon("text")} Describe</button>
+        <button data-v="ref" aria-pressed="false">${icon("photo")} Reference image</button></div>
+      <div class="field" id="no-text"><label for="no-prompt">Description</label>
+        <textarea class="textarea" id="no-prompt" placeholder="A small round healing potion: red liquid in clear glass, a cork stopper tied with string."></textarea></div>
+      <div class="field" id="no-ref" hidden><span class="label">Reference image</span>
+        <label class="drop" id="no-drop">${icon("photo")}<span>Drop an image here, or click to choose</span>
+          <input type="file" accept="image/png,image/jpeg,image/webp" hidden id="no-file"></label>
+        <textarea class="textarea" id="no-prompt2" style="min-height:60px" placeholder="Optional notes, for example: make it gold"></textarea></div>
+      <div class="row-2"><div class="field"><label for="no-name">Name</label><input class="input" id="no-name" placeholder="Optional"></div>
+        <div class="field"><span class="label">Size (longest side)</span><div class="segmented" id="no-h">
+          ${[24, 32, 48, 64, 96].map((v) => `<button data-v="${v}" aria-pressed="${v === 48}">${v} px</button>`).join("")}</div></div></div>
+    </div>
+    <div class="actions"><span class="estimate" id="no-est"></span><button class="btn" data-close>Cancel</button><button class="btn primary" id="no-go">Create object</button></div>`, (s) => {
+    wireSegmented(s);
+    $("#no-est").textContent = estimateText(state.overview.estimates.object || 0.15);
+    s.querySelector("[data-close]").onclick = closeSheet;
+    s.querySelectorAll("#no-mode button").forEach((b) => b.addEventListener("click", () => {
+      const ref = segmentedValue($("#no-mode")) === "ref";
+      $("#no-text").hidden = ref;
+      $("#no-ref").hidden = !ref;
+    }));
+    const drop = $("#no-drop");
+    const take = (file) => {
+      if (!file || !/^image\/(png|jpeg|webp)$/.test(file.type)) return toast("Use a PNG, JPG or WEBP image", true);
+      const rd = new FileReader();
+      rd.onload = () => {
+        reference = rd.result;
+        drop.innerHTML = `<img src="${reference}" alt="Reference">`;
+        drop.classList.add("has-image");
+        const img = drop.querySelector("img");
+        img.onload = () => {  // pixel art: crisp whole-number zoom; photos and paintings: smooth fit
+          if (img.naturalWidth <= 256 && img.naturalHeight <= 256) {
+            const k = Math.max(1, Math.floor(Math.min(320 / img.naturalWidth, 220 / img.naturalHeight)));
+            img.style.width = img.naturalWidth * k + "px";
+            img.style.maxHeight = "none";
+            img.style.imageRendering = "pixelated";
+          }
+        };
+      };
+      rd.readAsDataURL(file);
+    };
+    $("#no-file").onchange = (e) => take(e.target.files[0]);
+    drop.ondragover = (e) => { e.preventDefault(); drop.classList.add("over"); };
+    drop.ondragleave = () => drop.classList.remove("over");
+    drop.ondrop = (e) => { e.preventDefault(); drop.classList.remove("over"); take(e.dataTransfer.files[0]); };
+    $("#no-go").onclick = async () => {
+      const ref = segmentedValue($("#no-mode")) === "ref";
+      const body = { project: project(), type: "object", name: $("#no-name").value.trim(), height: Number(segmentedValue($("#no-h"))),
+        prompt: (ref ? $("#no-prompt2") : $("#no-prompt")).value.trim(), reference: ref ? reference : null };
+      if (ref && !reference) return toast("Add a reference image first", true);
+      if (!ref && !body.prompt) return toast("Describe the object first", true);
+      const r = await act(() => api("/api/characters", body), "Planning your object");
+      if (r) { closeSheet(); location.hash = `#/item/${encodeURIComponent(r.id)}`; }
+    };
   });
 }
 
@@ -1006,7 +1072,7 @@ function alertDeleteItem(it) {
     onConfirm: async () => {
       const r = await act(() => api("/api/item/delete", { project: project(), id: it.id, with_animations: anims.length > 0 }),
         "Moved to Recently Deleted");
-      if (r && route().view === "item") location.hash = `#/${it.kind === "animation" ? "animations" : "characters"}`;
+      if (r && route().view === "item") location.hash = `#/${it.kind === "animation" ? "animations" : it.kind === "object" ? "objects" : "characters"}`;
     },
   });
 }

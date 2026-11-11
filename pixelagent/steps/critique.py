@@ -35,7 +35,8 @@ def _evaluate(ctx, doc, tag, ref=None):
 
     fmode = ctx.cfg.get("finish", {}).get("mode")
     note = (prompts.CRITIC_SOFT.format(colors=spec.max_colors) if fmode == "reduce"
-            else prompts.CRITIC_NATIVE if fmode == "native" else "")
+            else (prompts.CRITIC_NATIVE_OBJECT if spec.asset_type == "prop" else prompts.CRITIC_NATIVE)
+            if fmode == "native" else "")
     crit = ctx.backend.llm.structured("critic", prompts.CRITIC.format(light=spec.light, lint=json.dumps(lint),
                                                                       style_note=note),
                                       spec.model_dump_json(), [pg, p1, ctx.input("concept", "concept")], Critique, stub)

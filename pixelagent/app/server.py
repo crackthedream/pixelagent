@@ -50,7 +50,9 @@ STAGES = {
 
 
 # which step's versions the app lists, and the image that represents each version
+STAGES["object"] = STAGES["character"]      # objects run the character pipeline (asset_type "prop")
 VERSIONED = {"character": ("artist", ("preview",)), "animation": ("anim_draw", ("gif", "gif_x4"))}
+VERSIONED["object"] = VERSIONED["character"]
 # rough upper-bound cost (USD, OpenAI mode, 96 px) of running again from each milestone; measured on real runs
 REDO_USD = {
     "character": {"Plan": 0.02, "Concept": 0.20, "Pixel conversion": 1.10, "Drawing": 0.95, "Quality check": 0.02,
@@ -144,7 +146,7 @@ def estimates(settings=None):
     # revisions: one concept edit + material map + critique (~$0.12)
     character = NATIVE_CHARACTER if mode == "native" else REDUCE_CHARACTER
     return ({**ESTIMATES, "character": character, "animation_base": 0.15, "animation_per_frame": 0.0,
-             "revise_area": 0.15, "revise_whole": 0.15, "expression": 0.06}
+             "revise_area": 0.15, "revise_whole": 0.15, "expression": 0.06, "object": 0.30}
             if mode in ("reduce", "native") else ESTIMATES)
 
 
@@ -266,7 +268,7 @@ def thumb_of(asset):
 def asset_summary(settings, pid, proj, aid, a=None):
     a = a or proj.asset(aid)
     st = a.state
-    kind = st.inputs.get("kind", "character")
+    kind = st.inputs.get("kind") or ("object" if st.inputs.get("asset_type") == "prop" else "character")
     gate = None
     for name, rec in st.steps.items():
         if rec.status == "awaiting_gate":
@@ -319,7 +321,7 @@ def asset_detail(settings, pid, proj, aid):
                             "retries": int(a.state.inputs.get("proportion_retries", 0)),
                             "note": mat.info.get("proportions") or ""}
     crit = a.state.steps.get("critique")
-    if d["kind"] == "character" and crit and crit.status == "done" and "critique" in crit.outputs:
+    if d["kind"] in ("character", "object") and crit and crit.status == "done" and "critique" in crit.outputs:
         # the quality check's verdict stays on the page after approval (it was only shown at gate C)
         try:
             with open(a.path(crit.outputs["critique"]), encoding="utf-8") as f:
@@ -331,7 +333,7 @@ def asset_detail(settings, pid, proj, aid):
     d["log"] = JOBS.logs.get((pid, aid), [])[-40:]
     from .. import cancel
     d["cancelling"] = d["running"] and cancel.requested(proj.root, aid)
-    d["can_revise"] = (d["kind"] == "character" and not d["running"]
+    d["can_revise"] = (d["kind"] in ("character", "object") and not d["running"]
                        and bool((a.state.steps.get("artist") and a.state.steps["artist"].outputs or {}).get("project"))
                        and (d["status"] == "complete" or d.get("gate") == "review"))
     d["job_error"] = JOBS.errors.get((pid, aid))
@@ -383,7 +385,8 @@ def asset_detail(settings, pid, proj, aid):
                          "compatible": v["compatible"]})
     d["versions"] = {"step": step, "items": vers}
     test_mode = settings.get("backend") == "dry_run"
-    d["redo"] = {label: (0.0 if test_mode else usd) for label, usd in REDO_USD[d["kind"]].items()}
+    d["redo"] = {label: (0.0 if test_mode else usd)
+                 for label, usd in REDO_USD["character" if d["kind"] == "object" else d["kind"]].items()}
     lv = read_live(a.dir, max_age=900) if d["running"] else None
     if lv:  # the model is drawing right now: its current drawing (never the tracing layer)
         meta, png = lv
@@ -476,11 +479,15 @@ def create_character(settings, body):
         with open(p, "wb") as f:
             f.write(base64.b64decode(m.group(2)))
         refs.append(p)
+    obj = body.get("type") == "object"
     if not prompt and not refs:
-        raise ValueError("describe the character or add a reference image")
-    aid = unique_id(proj, safe_id(name or prompt.split(",")[0] or "character"))
-    proj.new_asset(aid, {"prompt": prompt or None, "references": refs, "height": int(body.get("height") or 0) or None,
-                         "name": name or None})
+        raise ValueError(f"describe the {'object' if obj else 'character'} or add a reference image")
+    aid = unique_id(proj, safe_id(name or prompt.split(",")[0] or ("object" if obj else "character")))
+    inputs = {"prompt": prompt or None, "references": refs, "height": int(body.get("height") or 0) or None,
+              "name": name or None}
+    if obj:
+        inputs.update(asset_type="prop", view="three_quarter")
+    proj.new_asset(aid, inputs)
     start_run(settings, pid, aid)
     return {"id": aid}
 
@@ -519,7 +526,8 @@ def make_expressions(settings, body):
     spend_check(settings, pid, aid)
     proj = Project(project_path(settings, pid), overrides(settings))
     a = proj.asset(aid)
-    if a.state.inputs.get("kind") == "animation" or a.state.status != "complete":
+    if a.state.inputs.get("kind") == "animation" or a.state.status != "complete" \
+            or a.state.inputs.get("asset_type") == "prop":
         raise ValueError("expressions are made for a finished character")
     if proj.config.get("finish", {}).get("mode") != "native":
         raise ValueError("expressions need the Soft look (pixel-art characters)")
@@ -537,8 +545,8 @@ def create_move_set(settings, body):
     spend_check(settings, pid)
     proj = Project(project_path(settings, pid), overrides(settings))
     a = proj.asset(char)
-    if a.state.inputs.get("kind") == "animation":
-        raise ValueError("a move set is made for a character, not for an animation")
+    if a.state.inputs.get("kind") == "animation" or a.state.inputs.get("asset_type") == "prop":
+        raise ValueError("a move set is made for a character")
     ids = []
     for m in dict.fromkeys(moves):
         prompt, frames = MOVES[m]

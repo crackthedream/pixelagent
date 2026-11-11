@@ -55,6 +55,28 @@ A calm, readable figure STANDING upright on both feet in a relaxed pose -- even 
 crouches -- with the arms close to the body, props small and held close, {view} view, centered, full body. NO
 furniture, bench, chair or other scenery objects. Plain flat light-grey background, no shadow, no text."""
 
+# objects and props in the native finish: one item, drawn as pixel art at its game size (the longest side)
+PIXEL_OBJECT_RULES = """SCALE: the item is about {size} pixels across its LONGEST side, drawn pixel by pixel. Show it
+enlarged so that EVERY sprite pixel is a crisp, perfectly square block of exactly {block}x{block} image pixels on one
+regular grid (nearest-neighbour: no smoothing, no blur, no anti-aliasing between blocks). Do NOT draw grid lines or
+pixel borders.
+PIXEL-ART RULES: a light, soft palette. Each material (wood, metal, glass, cloth, liquid...) uses 3-5 flat tones laid
+down as clean, deliberate clusters -- no gradients, no dithering, no noise. NO dark outline ring around the item: its
+edges are its own darker or lighter tones; dark pixels only for real dark materials and small inner details. Light
+from the top-left, with 1-2 pixel highlights on shiny or glassy parts. A clear, recognisable silhouette that reads at
+1x; details simplified to what {size} pixels can hold.
+ONE single item, whole and centred, alone, shown {view} as a game shows it in the world or an inventory: no hands, no
+character, no other objects, no scenery, no shadow, no text. Plain flat light-grey background."""
+
+PIXEL_OBJECT = """Redraw the item in this image as an authentic hand-pixelled game SPRITE for a 2D anime action game, in
+the style of modern hand-made pixel-art action platformers. Keep what the item is: its shape, colours and signature
+details, simplified for this size. Item: {summary}. Must keep: {must_keep}.
+""" + PIXEL_OBJECT_RULES
+
+PIXEL_OBJECT_TEXT = """An authentic hand-pixelled game SPRITE of one item for a 2D anime action game, in the style of
+modern hand-made pixel-art action platformers. Item: {summary}. Must keep: {must_keep}.
+""" + PIXEL_OBJECT_RULES
+
 PIXEL_SPRITE = """Redraw the character in this image as an authentic hand-pixelled SPRITE for a 2D side-scrolling anime
 action game, in the style of modern hand-made pixel-art action platformers. Keep who the character is: hairstyle and
 hair colour, eye colour, costume colours and the signature accessories, simplified for this size. Character:
@@ -174,6 +196,13 @@ light palette with 4-6 tones per material in deliberate clusters, soft edges and
 do not ask to add an outline or reduce to a strict palette. Judge what matters: readability at 1x, proportions,
 identity against the concept, the face and its expression, hands and held items, and clean clusters (no noise).
 The lint counts below follow strict-palette rules: treat them as information."""
+
+CRITIC_NATIVE_OBJECT = """
+STYLE (by design, do not report it as an issue): this game's look is hand-pixelled anime action-game sprites. A
+light palette with 3-5 tones per material in deliberate clusters, soft edges and no dark outline ring are intended;
+do not ask to add an outline or reduce to a strict palette. This is an ITEM, not a character: judge readability of
+the silhouette at 1x, whether it is clearly the item described, its materials, highlights and clean clusters (no
+noise). The lint counts below follow strict-palette rules: treat them as information."""
 
 # the critic's note for the soft look's reduce finish (config [finish] mode = "reduce")
 CRITIC_SOFT = """

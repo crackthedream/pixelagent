@@ -343,6 +343,24 @@ class AppServerTest(unittest.TestCase):
         self.assertEqual(tres.count('[sub_resource type="AtlasTexture"'), 6)
         self.assertEqual(self.post("/api/gamepack", {"project": pid, "id": aid})[0], 400)
 
+    def test_objects_are_items_of_their_own(self):
+        pid = self.new_project("Items")
+        oid = self.ok(self.post("/api/characters", {"project": pid, "type": "object", "height": 32,
+                                                    "prompt": "a small round healing potion"}))["id"]
+        d = self.drive(pid, oid)
+        self.assertEqual((d["status"], d["kind"]), ("complete", "object"))
+        a = Project(os.path.join(self.projects, pid)).asset(oid)
+        with open(a.output("intake", "spec"), encoding="utf-8") as f:
+            spec = json.load(f)
+        self.assertEqual((spec["asset_type"], spec["height_px"]), ("prop", 32))
+        self.assertEqual(a.state.steps["concept"].info["block"], 19)        # 32 px fills ~60% of a 1024-px image
+        self.assertEqual(a.state.steps["pixelize"].info["grid"]["p"], 19.0)  # read back on that block size
+        items = self.ok(self.get(f"/api/assets?project={pid}"))["items"]
+        self.assertEqual([i["kind"] for i in items if i["id"] == oid], ["object"])
+        self.assertEqual(self.post("/api/expressions", {"project": pid, "id": oid})[0], 400)   # no face
+        self.assertEqual(self.post("/api/movesets", {"project": pid, "character": oid})[0], 400)
+        self.assertIn("object", self.ok(self.get("/api/overview"))["estimates"])
+
     def test_rename_duplicate_and_delete_items(self):
         pid = self.new_project("Manage")
         proj = Project(os.path.join(self.projects, pid))

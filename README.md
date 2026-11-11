@@ -148,6 +148,14 @@ own grid and graded like it. Only the face changes, pixel for pixel; each comes 
 with its box (`expressions/expressions.json`) for games that swap faces. About $0.055 a face. In the app: the
 character's Expressions card; in code: `pixelagent.expressions.make(project, id, names)`.
 
+## Objects
+Items and props (the app's Objects library and New object, or `new ID --type prop --height 48`) run the
+character pipeline with the native finish. The image model draws one item as pixel art on a square image, with
+blocks sized so the item fills about 60% of it; it is read back, rebuilt and graded like a character. Faces,
+animations and expressions do not apply. The size is the item's longest side (default `[style] prop_size = 48`).
+An item drawn more than 20% bigger is read again at its asked size; the image model draws long, thin items with
+far more pixels than asked. About $0.29 an object (two drafts without a reference).
+
 ## Game pack
 `python -m pixelagent --project P pack CHARACTER` (or Save next to "Game pack" in the app's Exports card) writes
 `assets/CHARACTER/game_pack/` and a zip of it. It holds one atlas with uniform cells, where the standing sprite,

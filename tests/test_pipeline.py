@@ -203,6 +203,28 @@ class PipelineTests(Base):
         data = imaging.to_bytes(imaging.load_rgba(a.output("export", "png")))
         self.assertNotIn(oc, {tuple(data[k:k + 3]) for k in range(0, len(data), 4) if data[k + 3]})
 
+    def test_objects_drawn_too_big_are_fitted_to_their_size(self):
+        self.proj.new_asset("item", {"prompt": "a lantern", "asset_type": "prop", "height": 40})
+        pipe = Pipeline(self.proj, "item")
+        self.assertEqual(pipe.run(auto_approve=True, log=quiet), "complete")
+        a = self.proj.asset("item")
+        self.assertNotIn("size_fit", a.state.steps["pixelize"].info)            # drawn at 40: kept as drawn
+        spec_path = a.output("intake", "spec")
+        with open(spec_path, encoding="utf-8") as f:
+            spec = json.load(f)
+        spec["height_px"] = 24                                                   # now it is far too big
+        with open(spec_path, "w", encoding="utf-8") as f:
+            json.dump(spec, f)
+        pipe = Pipeline(self.proj, "item")
+        pipe.reset_from("pixelize")
+        self.assertEqual(pipe.run(auto_approve=True, log=quiet), "complete")
+        a = self.proj.asset("item")
+        fit = a.state.steps["pixelize"].info["size_fit"]
+        self.assertEqual(fit["asked"], 24)
+        im = imaging.load_rgba(a.output("export", "png"))
+        bb = im.getbbox()
+        self.assertLessEqual(abs(max(bb[2] - bb[0], bb[3] - bb[1]) - 24), 2)
+
     def test_palette_grade_mutes_colours_and_lifts_shadows_in_order(self):
         import numpy as np
         from pixelagent.steps.build import GRADES, _oklab, grade_colours

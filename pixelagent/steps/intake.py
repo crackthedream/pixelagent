@@ -23,10 +23,14 @@ def run(ctx):
     text = "\n".join(filter(None, [inp.get("prompt"), *ctx.notes(),
                                    f"style guide: {dict(style)}", f"requested height: {inp.get('height')}"]))
     spec = ctx.backend.llm.structured("director", prompts.INTAKE, text, refs, CharacterSpec, stub)
+    if inp.get("asset_type"):  # what the user asked to make (a character or an object) is not the model's choice
+        spec.asset_type = inp["asset_type"]
     if inp.get("height"):  # explicit user values win over the model
         spec.height_px = int(inp["height"])
     elif spec.asset_type == "character":  # otherwise characters follow the project's style guide
         spec.height_px = int(style["sprite_height"])
+    elif spec.asset_type == "prop":  # an object's size is its longest side
+        spec.height_px = int(style.get("prop_size", 48))
     if spec.asset_type == "character" and style.get("look") == "soft" and not inp.get("keep_proportions"):
         spec.heads_tall = float(style.get("heads_tall", 4.5))   # the look sets the proportions (editable at gate A)
         spec.outline = "soft"

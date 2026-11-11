@@ -146,6 +146,7 @@ outline_color = "#1b1325"
 max_colors = 40              # the soft look needs a few more gentle shades
 ramp_steps = 5
 hue_shift = 24
+prop_size = 48               # default object size in pixels (its longest side): items and props in the game
 sprite_height = 160          # default character height in pixels. 160 px gives faces ~16 px wide, the scale of
                              # hand-made anime sprites (Alice in Cradle: ~150 px, faces 16-18 px); at 96 px faces are
                              # 9-13 px and expressions read crude. A real 160-px run cost about the same as 96 px.

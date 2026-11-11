@@ -73,7 +73,8 @@ def locate_face(backend, concept_path, geom, size):
     sprite's material labels cannot do it (skin is labelled on hands, a plush toy and lit hair; most characters have no
     eye material; 2026-11-11). None when the model sees no face."""
     from PIL import Image as _I
-    W, H = _I.open(concept_path).size
+    with _I.open(concept_path) as im:
+        W, H = im.size
 
     def stub():
         return FaceLocation(found=False, x0=0, y0=0, x1=0, y1=0)

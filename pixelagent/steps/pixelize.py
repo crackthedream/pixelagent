@@ -13,7 +13,22 @@ def _native(ctx):
     fix = ctx.asset.state.inputs.get("concept_fix") or {}
     keep = fix.get("grid") if fix.get("box") else None    # an area revision keeps the grid
     from .concept import BLOCK
-    canvas, geom = sprite_from_pixel_art(concept, int(ctx.style["canvas_margin"]), grid=keep, expected=BLOCK)
+    crec = ctx.asset.state.steps.get("concept")
+    block = (crec.info or {}).get("block") if crec else None     # objects are drawn with bigger blocks
+    margin = int(ctx.style["canvas_margin"])
+    canvas, geom = sprite_from_pixel_art(concept, margin, grid=keep, expected=block or BLOCK)
+    bb = canvas.getbbox()
+    spec = ctx.spec()
+    if spec.asset_type == "prop" and bb and not keep:
+        # an object's size is a game requirement (an inventory icon, a prop next to a 160-px character), and the
+        # image model draws long thin items with far more pixels than asked (a 48-px sword came back 82 px,
+        # 2026-11-11): more than 20% too big, it is read again on a proportionally larger regular grid
+        longest, want = max(bb[2] - bb[0], bb[3] - bb[1]), int(spec.height_px)
+        if longest > want * 1.2:
+            r = longest / float(want)
+            g = geom["grid"]
+            canvas, geom = sprite_from_pixel_art(concept, margin, period=(g["px"] * r, g["py"] * r), snap=False)
+            ctx.info["size_fit"] = {"drawn": longest, "asked": want, "ratio": round(r, 3)}
     ctx.save_image("candidate0", "grid_00.png", canvas)
     ctx.save_image("pixel_base", "pixel_base.png", canvas)
     ctx.save_json("geom", "grid_geom.json", geom)

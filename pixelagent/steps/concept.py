@@ -99,7 +99,7 @@ def _revise(ctx, fix):
 BLOCK = 8   # image pixels per sprite pixel asked of the image model (160 px * 8 = 1280 px, fits 1024x1536)
 
 
-def _native_stub(ctx, spec):
+def _native_stub(ctx, spec, block=BLOCK):
     """Test runs: a synthetic character reduced to the sprite height and shown as crisp blocks, like the image
     model's pixel-art sprite."""
     def stub(k, out_dir):
@@ -109,10 +109,50 @@ def _native_stub(ctx, spec):
             im, _ = synth.draw_character(seed=i, background=None)
             small = imaging.pixelize(im, min(spec.height_px, 180), margin=0)
             p = f"{out_dir}/gen{i:02d}.png"
-            enlarge(small, BLOCK).save(p)
+            enlarge(small, block).save(p)
             paths.append(p)
         return paths
     return stub
+
+
+def object_block(size):
+    """Image pixels per sprite pixel for an object of `size` pixels (longest side) on a 1024-px square image: the item
+    fills about 60% of it, in blocks of 8-32 px (small items get big blocks; the image model draws them cleaner)."""
+    return max(8, min(32, int(1024 * 0.6 / max(1, size))))
+
+
+def _native_object(ctx, spec, refs):
+    """The native finish for an object: one item drawn as pixel art on a square image, read back like a character."""
+    size = int(spec.height_px)
+    block = object_block(size)
+    view = {"three_quarter": "in a three-quarter view", "front": "from the front", "side": "from the side",
+            "back": "from the back"}.get(spec.view, "in a three-quarter view")
+    fmt = dict(size=size, block=block, view=view, summary=spec.summary, must_keep=", ".join(spec.must_keep) or "-")
+    prompt = (prompts.PIXEL_OBJECT if refs else prompts.PIXEL_OBJECT_TEXT).format(**fmt)
+    notes = ctx.notes()
+    if notes:
+        prompt += "\nChanges requested: " + "; ".join(notes)
+    with open(ctx.path("concept_prompt.txt"), "w", encoding="utf-8") as f:
+        f.write(prompt)
+    n = 1 if refs else int(ctx.cfg["budget"]["concept_drafts"])
+    old = ctx.cfg["images"].get("draft_size")
+    ctx.cfg["images"]["draft_size"] = "1024x1024"
+    try:
+        out = ctx.backend.images.generate("image_final", prompt, n, ctx.path("generated"), refs[:1] or None,
+                                          _native_stub(ctx, spec, block))
+    finally:
+        if old is None:
+            ctx.cfg["images"].pop("draft_size", None)
+        else:
+            ctx.cfg["images"]["draft_size"] = old
+    cands = [imaging.load_rgba(p) for p in out]
+    for i, im in enumerate(cands):
+        ctx.save_image(f"candidate{i}", f"concept_{i:02d}.png", im)
+    thumbs = [im.resize((max(1, im.width * 256 // im.height), 256)) for im in cands]
+    ctx.save_image("sheet", "concepts_sheet.png",
+                   imaging.contact_sheet(thumbs, [f"#{i} pixel sprite" for i in range(len(cands))], 1))
+    ctx.info.update(candidates=len(cands), sources=["pixel sprite"] * len(cands), suggested=0, native=True,
+                    block=block)
 
 
 def _native(ctx, spec, refs, view):
@@ -149,6 +189,8 @@ def run(ctx):
     spec0 = ctx.spec()
     if ctx.cfg.get("finish", {}).get("mode") == "native" and spec0.asset_type == "character":
         return _native(ctx, spec0, ctx.asset.references(), spec0.view.replace("_", "-"))
+    if ctx.cfg.get("finish", {}).get("mode") == "native" and spec0.asset_type == "prop":
+        return _native_object(ctx, spec0, ctx.asset.references())
     spec = ctx.spec()
     refs = ctx.asset.references()
     cands, sources = [], []
