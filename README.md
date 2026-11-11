@@ -148,6 +148,13 @@ own grid and graded like it. Only the face changes, pixel for pixel; each comes 
 with its box (`expressions/expressions.json`) for games that swap faces. About $0.055 a face. In the app: the
 character's Expressions card; in code: `pixelagent.expressions.make(project, id, names)`.
 
+## Game pack
+`python -m pixelagent --project P pack CHARACTER` (or Save next to "Game pack" in the app's Exports card) writes
+`assets/CHARACTER/game_pack/` and a zip of it. It holds one atlas with uniform cells, where the standing sprite,
+every face and every finished animation's frames have their feet on the same pivot. Alongside it come an
+Aseprite/TexturePacker JSON (frame rectangles, durations, a frameTag per animation), a Godot 4 SpriteFrames `.tres`
+and a README with the cell size, the pivot and Godot/Unity import steps. Free: no model calls.
+
 ## Files
 ```
 config.toml            engine path, backend mode, model per role, budgets, style guide

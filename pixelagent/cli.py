@@ -43,6 +43,14 @@ def cmd_run(args):
     pipe.run(auto_approve=args.auto_approve, until=args.until)
 
 
+def cmd_pack(args):
+    from . import gamepack
+    folder, zpath, summary = gamepack.build(_project(args), args.id)
+    print(f"game pack: {zpath}")
+    print(f"  {summary['frames']} frames in {summary['cell'][0]}x{summary['cell'][1]} cells, "
+          f"pivot {summary['pivot']}; animations: {', '.join(summary['animations'])}")
+
+
 def cmd_status(args):
     p = _project(args)
     ids = [args.id] if args.id else p.asset_ids()
@@ -140,6 +148,10 @@ def main(argv=None):
     s.add_argument("--from", dest="from_step")
     s.add_argument("--until")
     s.set_defaults(fn=cmd_run)
+
+    s = sub.add_parser("pack", help="a finished character's game pack: atlas, Aseprite JSON, Godot SpriteFrames")
+    s.add_argument("id")
+    s.set_defaults(fn=cmd_pack)
 
     s = sub.add_parser("status")
     s.add_argument("id", nargs="?")

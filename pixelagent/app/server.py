@@ -318,6 +318,15 @@ def asset_detail(settings, pid, proj, aid):
         d["proportions"] = {"heads_tall": mat.info["heads_tall_measured"],
                             "retries": int(a.state.inputs.get("proportion_retries", 0)),
                             "note": mat.info.get("proportions") or ""}
+    crit = a.state.steps.get("critique")
+    if d["kind"] == "character" and crit and crit.status == "done" and "critique" in crit.outputs:
+        # the quality check's verdict stays on the page after approval (it was only shown at gate C)
+        try:
+            with open(a.path(crit.outputs["critique"]), encoding="utf-8") as f:
+                c = json.load(f)
+            d["quality"] = {"overall": c.get("overall"), "issues": [i["problem"] for i in c.get("issues", [])][:5]}
+        except (OSError, ValueError, KeyError, TypeError):
+            pass
     d["inputs"] = {k: v for k, v in a.state.inputs.items() if k in ("prompt", "height", "view", "character", "frames", "anim")}
     d["log"] = JOBS.logs.get((pid, aid), [])[-40:]
     from .. import cancel
@@ -485,6 +494,18 @@ MOVES = {
     "attack": ("5-frame attack, plays once, side view facing right: wind up, strike, follow through, recover", 5),
     "hurt": ("3-frame hurt reaction, plays once: flinch and recoil backwards, then recover", 3),
 }
+
+
+def game_pack(settings, body):
+    """Build a character's game pack (atlas, Aseprite JSON, Godot SpriteFrames, README) and return its zip's URL."""
+    from .. import gamepack
+    pid, aid = body["project"], body["id"]
+    proj = Project(project_path(settings, pid), overrides(settings))
+    a = proj.asset(aid)
+    if a.state.inputs.get("kind") == "animation":
+        raise ValueError("a game pack is made for a character (it includes its animations)")
+    _, zpath, summary = gamepack.build(proj, aid)
+    return {"url": file_url(pid, a, os.path.relpath(zpath, a.dir)), **summary}
 
 
 def make_expressions(settings, body):
@@ -941,6 +962,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(create_animation(s, body))
             if u.path == "/api/movesets":
                 return self._json(create_move_set(s, body))
+            if u.path == "/api/gamepack":
+                return self._json(game_pack(s, body))
             if u.path == "/api/expressions":
                 return self._json(make_expressions(s, body))
             if u.path == "/api/decide":

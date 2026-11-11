@@ -2,7 +2,8 @@
 
 A handoff document for an AI developer (GPT) continuing this project. It describes what exists, how it works,
 what has been measured, which decisions the owner has made, and what is left to build, in priority order.
-Status as of 2026-11-09 (updated after the first seven roadmap items; see `git log` of `crackthedream/pixelagent`
+Status as of 2026-11-11 (the native pixel-art finish, palette grade, move sets, expressions and game packs: section
+13; earlier status from 2026-11-09 below where not superseded; see `git log` of `crackthedream/pixelagent`
 and `7801b3e` of `crackthedream/pixelliner-mcp`, both private GitHub repositories).
 
 ---
@@ -18,10 +19,12 @@ These come from the owner and from incidents during development. Treat them as r
 2. **Do not modify PixelLiner itself.** `C:\Program Files\PixelLiner` is a closed Adobe AIR application. This
    project only writes files that PixelLiner can open (PNG, GIF) and launches it on them. All drawing happens in
    the separate headless engine (`pixelliner-mcp`).
-3. **The model draws the pixel art through MCP tool calls.** The owner was explicit: the goal is not an image
-   model producing pixel art directly, but a model that uses a reference to *draw* with the pixelliner tools.
-   Image models are used only for concepts and pose sheets; the final sprite and every animation frame are
-   drawn by the artist agent through MCP.
+3. **How pixels are made (changed 2026-11-10).** The owner first asked for a model that *draws* with the
+   pixelliner tools through MCP (the artist finish, now the app's Classic look). After the face root-cause
+   analysis, the owner chose the **native finish** as the default: the image model draws the character and
+   its animation sheets as pixel art, read back pixel for pixel. It was rated 4.8 against 3.7, with faces 4.5
+   against 4.0. The aim is the look of Alice in Cradle's characters: pixel-art vividness, not a chibi
+   conversion of an illustration. Keep the artist finish working, but improve the native one.
 4. **Fix root causes, not examples.** When a test character looks wrong, find the mechanism that fails for a
    whole class of inputs, fix that, and measure it on all benchmark characters (see section 7). Do not tune for
    one sample.
@@ -182,7 +185,7 @@ python -m pixelagent --project P animate hero walk --prompt "6-frame walk cycle 
 python -m pixelagent --project P export hero --open           # opens the PNG in PixelLiner
 python -m pixelagent --project P status hero
 
-# tests (61 tests, ~110 s; all dry-run, no cost)
+# tests (~140 tests, ~8 min; all dry-run, no cost)
 python -m unittest discover -s tests
 
 # benchmarks (real money in openai mode)
@@ -212,7 +215,7 @@ distance to concept 0.050 → 0.041; model calls after pixelize 210 → 99; cost
 
 ---
 
-## 8. Artist mode (the default finish) and faces
+## 8. Artist mode (the Classic look; the default until 2026-11-10) and faces
 
 1. Steps 3–9 produce a palette-clean **trace** on the final pixel grid.
 2. `artist` gives the vision model: the concept (design authority), the trace as a faint tracing layer (never
@@ -630,17 +633,20 @@ license, dependency lock and pinned engine revision in the build, CI, clean-mach
 3. **Budget scope:** the app's monthly limit uses its ledger (all app runs, also from deleted projects);
    command-line and benchmark runs (`python -m pixelagent`, `benchmarks/`) count their own project only and are
    not in the app's ledger.
-4. **Faces at 96 px** are much better than at 64 px but remain the weakest part. Model judges cannot rate them
-   reliably; the owner's blind ratings (face lab round 1) kept today's face pass over two alternatives.
-5. **Character-tuned pipeline.** `CharacterSpec.asset_type` accepts `prop`, `tile` and `scene`, but the steps
+4. **Faces:** with the native finish they rate 4.5 (owner, ten references). Model judges cannot rate them
+   reliably; use the owner's ratings. Expressions are redrawn simpler and more frontal than a three-quarter face.
+5. **Native-finish limits:** the proportion check misreads pixel art and is information only. The image model
+   picks its own pixel count, so sprite heights vary by about 10%. Material labels are coarse (no eye material on
+   most characters).
+6. **Character-tuned pipeline.** `CharacterSpec.asset_type` accepts `prop`, `tile` and `scene`, but the steps
    (face pass, material labels, pose logic) assume a character. Objects and scenes are not yet supported in
    practice.
-6. **Image-model prices are unverified.** Costs are estimates; `costs.jsonl` keeps raw token counts for
+7. **Image-model prices are unverified.** Costs are estimates; `costs.jsonl` keeps raw token counts for
    recomputation.
-7. **Windows-only parts:** `winreg` for the key and the Edge lookup, and `os.startfile`.
-8. **Distribution:** the exe is unsigned, so Windows SmartScreen will warn on other machines. There is no
+8. **Windows-only parts:** `winreg` for the key and the Edge lookup, and `os.startfile`.
+9. **Distribution:** the exe is unsigned, so Windows SmartScreen will warn on other machines. There is no
    installer and no auto-update.
-9. **Single user, local only,** by design. The server must never bind to anything other than 127.0.0.1.
+10. **Single user, local only,** by design. The server must never bind to anything other than 127.0.0.1.
 
 ---
 
@@ -656,26 +662,31 @@ the fixes they turned up: the face-pass cost, a race when the page read an item 
 file locks on `state.json`, the user's name being replaced by the planner, cropped concepts on the stage, and
 an animation-listing bug.
 
-### Next: app
-1. ~~One real animation from the exe~~ done 2026-11-09 ($1.93; the live view followed all six frames).
-   ~~Cancel; revise instead of redraw; fix an area~~ done 2026-11-09 (section 11a). Next for steering: revising a
-   single animation frame the same way (the frames are already separate PNGs and cels).
-2. **More animation presets and export targets.**
-   - Presets: idle, run, attack, jump, hurt, death, cast, with frame defaults.
-   - Exports: sheet metadata for game engines (Aseprite JSON, Godot SpriteFrames, Unity), and multi-row sheets.
-3. **Concept versions** in the Versions card (concept step outputs are on disk under `vNNN/`).
-4. **Accurate costs:** price cached input at its discounted rate (needs the cached-input prices per model in
-   `config.toml [pricing]`).
+### Done on 2026-11-10/11 (details and numbers: `docs/FACE_ROOT_CAUSE.md`)
+- **Native pixel-art finish** (now the default, the app's Soft look). The image model draws the character as pixel
+  art, which is read back block by block. Owner ratings on the ten references: 4.8 overall and 4.5 for faces
+  (artist and reduce finishes: 3.7 and 4.0). About $0.15 a character.
+- **Palette grade** (`[finish] grade`, the app's Colours setting; medium is the owner's pick): muted colours and
+  lifted shadows, toward Alice in Cradle's dusty palette.
+- **Animations:** a pixel-art pose sheet drawn over a layout of the finished sprite, with the frames read back.
+  Frames match the character's size; ~$0.07 an animation.
+- **Move set:** idle, walk, run, jump, attack and hurt in one go (app button, `benchmarks/move_set.py`).
+- **Expressions:** happy, sad, angry, surprised, hurt and blink. Only the face changes, located by the vision
+  model; ~$0.055 a face (`pixelagent/expressions.py`).
+- **Game pack:** an atlas with uniform cells and one pivot, Aseprite/TexturePacker JSON, Godot 4 SpriteFrames and
+  a README (`pixelagent/gamepack.py`, `pixelagent pack ID`, the Exports card).
 
-### Next: quality
-5. ~~Reference-image benchmark~~ first round done 2026-11-09 (section 11c). Next: rerun the ten with the cleanup
-   and face-box fixes (~$6.50), owner ratings, and a second sample per reference.
-6. **Faces.** The face kit (rules v3, Alice in Cradle construction) at 160 px is the default (section 8).
-    Next: a face-lab round of v1 against v3 with the latest kit on the 160-px runs, rated blind by the owner
-    (`benchmarks/face_lab.py` prepare / run / serve / report). Do not rely on model judges.
-7. **Directions and consistency.** Front/side/back (4- or 8-direction) sprites of the same character with an
-    identical palette and proportions, reusing the animation approach: one sheet for all views, then shared
-    scale and palette.
+### Next: characters
+1. **A validation round for move sets and expressions** on several references, rated by the owner (one character
+   so far: ref05). Watch for drift in the frames' faces and for poses the layout holds back.
+2. **Steering single pieces:** redo one animation frame or one expression with a note (the frames are separate
+   PNGs; expressions already redo by name).
+3. **Faces inside animations:** let an animation use an expression (a hurt move with the hurt face) by pasting the
+   face patch onto upright frames, or by giving the face to the pose sheet's layout.
+4. **Directions:** left/right is a mirror for side-scrolling games. Back and front views, and 4/8 directions for
+   top-down games, only if the owner wants them: one sheet for all views on the layout approach.
+5. **Accurate costs:** price cached input at its discounted rate (`config.toml [pricing]`).
+6. **Concept versions** in the Versions card (the concept step's outputs are on disk under `vNNN/`).
 
 ### Later: objects and backgrounds, as their own workflows
 The owner's direction (2026-11-09): **characters are the primary focus.** Objects and backgrounds must be supported
@@ -693,24 +704,25 @@ app sheet ("New object", "New background") and benchmark.
 | Checks | Lint, critic, face, frame consistency | Lint, silhouette readability at 1x | Seam lint (left/right edges match), parallax layer alpha, colour count per layer |
 | Export | PNG, layers, animation | PNG, icon sizes, item sheet | Layered parallax PNGs, tileable strips, a PixelLiner project |
 
-8. **Objects/props:** reuses most character steps; the work is object-aware material labels, the size rules,
+7. **Objects/props:** start from the native finish (the image model draws the item as pixel art, read back) and the
+   palette grade; it reuses most character steps; the work is object-aware material labels, the size rules,
    skipping the face pass and animation, and an "item sheet" export. Done when three benchmark props (for
    example a weapon, a chest, a potion) export cleanly from a prompt.
-9. **Backgrounds/scenes:** a new pipeline (layout plan → per-layer concepts → per-layer conversion → targeted
+8. **Backgrounds/scenes:** a new pipeline (layout plan → per-layer concepts → per-layer conversion → targeted
    artist passes → seam and layer checks → layered export). Start with a short design doc and 3 benchmark
    prompts (forest, town street, cave) before code.
-10. **Tiles and tilesets:** a subset of backgrounds: seamless edges (wrap-around lint), autotile variants (corners
+9. **Tiles and tilesets:** a subset of backgrounds: seamless edges (wrap-around lint), autotile variants (corners
     and edges), and a palette shared with the characters. Needs a tiling preview and an edge-continuity lint in
     the engine.
 
 ### Later: distribution
-11. **Signing and installer:**
+10. **Signing and installer:**
     - code-sign the exe (to avoid the SmartScreen warning);
     - an installer (MSIX or Inno Setup) with a Start menu entry;
     - optional auto-update from GitHub releases.
-12. **First-run onboarding:** a welcome sheet that sets the API key, explains test-run mode and creates a
+11. **First-run onboarding:** a welcome sheet that sets the API key, explains test-run mode and creates a
     first project.
-13. **Cross-platform:** abstract the Windows-only calls (`winreg`, `os.startfile`, the Edge lookup) if macOS or
+12. **Cross-platform:** abstract the Windows-only calls (`winreg`, `os.startfile`, the Edge lookup) if macOS or
     Linux are ever wanted.
 
 ---
@@ -721,15 +733,16 @@ app sheet ("New object", "New background") and benchmark.
 |---|---|
 | Model provider | OpenAI API (Pro $100 tier credit) |
 | Framework | No agent framework. A thin custom layer over the OpenAI Responses API plus a custom MCP client; the project is a pipeline with gates, not an open-ended agent. |
-| How pixels are made | The model draws through MCP; hybrid over the pipeline's trace |
-| Default sprite height | 96 px |
+| How pixels are made | Native finish by default (2026-11-10): the image model draws pixel art, read back; the MCP artist stays as the Classic look |
+| Default sprite height | 160 px, about 4.5 heads (Alice in Cradle scale; earlier 96 px) |
 | Animation | Driven by the user's prompt; separate asset per animation |
 | Optimisation policy | Root causes across all benchmark characters, never per-example tweaks |
 | UI | Local web UI in an app window, Apple-style, packaged as an .exe |
 | Focus | Characters first. Objects and backgrounds later, from prompts, each as its own workflow (2026-11-09) |
 | Faces | Judged by the owner's blind ratings (benchmarks/face_lab.py), not by model judges |
 | Deleting | Recently Deleted inside the app with Restore, Delete Now and Delete All, instead of the Windows Recycle Bin (2026-11-09) |
-| Final pixels | Characters and animations: every final pixel drawn by the model. Backgrounds: converted pixels may remain, with targeted model passes (2026-11-09) |
+| Final pixels | Native: the image model's drawn pixels, read back, rebuilt in 3-6 tones a material and graded (palette grade medium, 2026-11-11). Backgrounds: converted pixels may remain, with targeted model passes (2026-11-09) |
+| Style target | Alice in Cradle's characters: vivid pixel-art faces, not detailed illustrations; eyes "suitable", not bigger; muted, light palette (2026-11-10/11) |
 | Repos | Private: `crackthedream/pixelagent`, `crackthedream/pixelliner-mcp` |
 
 ---

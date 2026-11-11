@@ -313,6 +313,35 @@ class AppServerTest(unittest.TestCase):
         status, png = self.get(d["expressions"][0]["face"])
         self.assertEqual((status, png[1:4]), (200, b"PNG"))
         self.assertIn("expression", self.ok(self.get("/api/overview"))["estimates"])
+        self.assertIn("overall", self.asset(pid, cid).get("quality") or {})      # the critic's verdict stays on the page
+
+    def test_game_pack_has_every_animation_and_face(self):
+        import io
+        import zipfile
+        pid = self.new_project("Pack")
+        cid = self.ok(self.post("/api/characters", {"project": pid, "prompt": "a small knight"}))["id"]
+        self.assertEqual(self.drive(pid, cid)["status"], "complete")
+        aid = self.ok(self.post("/api/animations", {"project": pid, "character": cid, "prompt": "4-frame idle",
+                                                    "name": "idle", "frames": 4}))["id"]
+        self.assertEqual(self.drive(pid, aid)["status"], "complete")
+        self.ok(self.post("/api/expressions", {"project": pid, "id": cid, "names": ["happy"]}))
+        self.wait_idle(pid, cid)
+        r = self.ok(self.post("/api/gamepack", {"project": pid, "id": cid}))
+        self.assertEqual(r["animations"], ["stand", "face_happy", "idle"])
+        self.assertEqual(r["frames"], 6)
+        status, data = self.get(r["url"])
+        self.assertEqual(status, 200)
+        names = zipfile.ZipFile(io.BytesIO(data)).namelist()
+        self.assertEqual(sorted(n.rsplit(".", 1)[-1] for n in names), ["json", "png", "tres", "txt"])
+        z = zipfile.ZipFile(io.BytesIO(data))
+        meta = json.loads(z.read([n for n in names if n.endswith(".json")][0]))
+        self.assertEqual([t["name"] for t in meta["meta"]["frameTags"]], r["animations"])
+        cw, ch = r["cell"]
+        self.assertTrue(all((f["frame"]["w"], f["frame"]["h"]) == (cw, ch) for f in meta["frames"]))
+        tres = z.read([n for n in names if n.endswith(".tres")][0]).decode()
+        self.assertIn('&"idle"', tres)
+        self.assertEqual(tres.count('[sub_resource type="AtlasTexture"'), 6)
+        self.assertEqual(self.post("/api/gamepack", {"project": pid, "id": aid})[0], 400)
 
     def test_rename_duplicate_and_delete_items(self):
         pid = self.new_project("Manage")

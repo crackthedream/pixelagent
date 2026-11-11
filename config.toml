@@ -88,7 +88,8 @@ mode = "native"              # "native": the image model draws the character AS 
                              # "reduce": the final sprite is the concept's own reduction with per-material colours
                              # (the soft look; faces and shading stay as the image model drew them, no model redraw;
                              # see docs/FACE_ROOT_CAUSE.md). "artist": the model redraws the sprite over the
-                             # conversion via MCP (+ face pass). "repair": older region rewrites + critic repairs.
+                             # conversion via MCP (+ face pass). "repair": LEGACY, not offered in the app (older region
+                             # rewrites + critic repairs; kept only for old projects and tests).
 grade = "medium"             # native finish palette grade: "none", "soft", "medium" or "strong" -- less saturated,
                              # lifted shadows, like Alice in Cradle's dusty colours; the face keeps its colours
 reduce_colors = 96           # colour budget of the reduce finish, shared by sqrt(area); eyes and mouth get >= 4

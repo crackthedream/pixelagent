@@ -383,6 +383,7 @@ function inspector(d) {
   const facts = [["Spent", `$${(d.cost || 0).toFixed(2)}`]];
   if (d.inputs.height) facts.push(["Height", `${d.inputs.height} px`]);
   if (d.inputs.frames) facts.push(["Frames", d.inputs.frames]);
+  if (d.quality && d.quality.overall != null) facts.push(["Quality check", `${esc(String(d.quality.overall))} / 10 <span class="muted">(model critic)</span>${d.quality.issues.length ? `<details class="muted small"><summary>${d.quality.issues.length} note${d.quality.issues.length === 1 ? "" : "s"}</summary>${d.quality.issues.map((i) => `<div>${esc(i)}</div>`).join("")}</details>` : ""}`]);
   if (d.proportions) facts.push(["Proportions", `${Number(d.proportions.heads_tall).toFixed(1)} heads tall${d.proportions.retries ? ` <span class="muted">(concept redone ${d.proportions.retries === 1 ? "once" : d.proportions.retries + " times"} to fit)</span>` : ""}`]);
   if (d.reference) facts.push(["Reference", `<a class="link" href="${esc(d.reference)}" target="_blank" rel="noopener">View image</a>`]);
   if (d.character) facts.push(["Character", `<a class="link" href="#/item/${encodeURIComponent(d.character)}">${esc(d.character_name || "Open")}</a>`]);
@@ -399,7 +400,8 @@ function inspector(d) {
   }
   if (d.exports) {
     html += `<div class="card"><h2>Exports</h2><div class="list">${d.exports.filter((e) => e.url).map((e) => `
-      <div class="row"><span class="grow">${esc(e.label)}</span><a href="${esc(e.url)}" download>Save</a></div>`).join("")}</div></div>`;
+      <div class="row"><span class="grow">${esc(e.label)}</span><a href="${esc(e.url)}" download>Save</a></div>`).join("")}
+      ${d.kind !== "animation" ? `<div class="row"><span class="grow">Game pack (ZIP)<div class="muted small">Atlas with every animation and face, for Godot, Unity, Aseprite JSON</div></span><button class="btn" id="btn-pack">Save</button></div>` : ""}</div></div>`;
   }
   if (d.kind !== "animation" && d.status === "complete") {
     const anims = state.items.filter((i) => i.kind === "animation" && i.character === d.id);
@@ -533,6 +535,14 @@ function wireDetail(d) {
   on("#btn-new-anim", () => sheetNewAnimation(d));
   on("#btn-move-set", () => sheetMoveSet(d));
   on("#btn-expr", () => sheetExpressions(d));
+  on("#btn-pack", async () => {
+    const r = await act(() => api("/api/gamepack", { project: p, id: d.id }));
+    if (r) {
+      const link = document.createElement("a");
+      link.href = r.url; link.download = ""; document.body.appendChild(link); link.click(); link.remove();
+      toast(`Game pack: ${r.frames} frames, ${r.animations.length} animations`);
+    }
+  });
   on("#btn-more", (e) => openMenu(e.currentTarget, itemMenu(d)));
   document.querySelectorAll("[data-version]").forEach((b) => b.onclick = () => {
     const v = Number(b.dataset.version);
