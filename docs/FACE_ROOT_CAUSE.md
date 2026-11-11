@@ -308,3 +308,21 @@ drawn strands, each eye a distinct pixel shape. The reduce finish gives a soft b
 - **Real run** (`bench_runs_native2`, ref08/02/05/03, $0.74): genuine pixel-art sprites with crisp clusters and
   pixel faces, 4.0-4.6 heads, 147-170 px, 30-56 colours. They are still darker and more saturated than Noel (dark
   hair and navy costumes), and the hair has darker edges in places.
+
+**Validation batch with the native finish** (2026-11-11, all ten owner references, `bench_runs_native_batch`):
+- **Runs:** 10/10 complete, $2.18 ($0.14-0.15 without a retry, ~$0.26 with one), 2.5-5 min each. All readbacks
+  correct (blocks 8-11.6 px, sprites 127-154 px; ref07 186 px).
+- **Owner ratings: overall 4.8, face 4.5** (the reduce batch: 3.7 and 4.0). Eight of ten rated 5 overall;
+  ref02 2 -> 5, ref03 3 -> 5, ref09 3 -> 5. Lowest: ref01 4/3 (face) and ref10 4/4.
+- **Open issues:**
+  - ref10 kept the seated reference's bench as part of the sprite (the prompt asked for a standing pose).
+  - The proportion check retried 6/10 and misread at least ref09 (2.07 heads: the plush toy against the face hides
+    the chin) and ref10 (no face found).
+- **Fixes** (2026-11-11, checked on ref10/09/02/04/07, $1.07, `bench_runs_native_fix`):
+  - seated references now stand: "STANDING upright... even if the reference sits; NO furniture, bench, chair";
+    ref10's bench is gone;
+  - readings outside 2.5-7.5 heads count as not believable and are not retried;
+  - the proportion retry is off for pixel-art sprites, with the measurement kept as information. On them the chin
+    measurement slides into the neck: ref04 read 3.1 and 4.6 for practically the same proportions, ref10 2.0 when
+    she is about 5 heads. Most retries in both pixel-art batches came from misreadings, and the image model's
+    proportions looked right and were rated 5. A pixel-art character now costs ~$0.15 (the app quotes $0.20).

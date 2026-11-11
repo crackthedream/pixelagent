@@ -41,8 +41,9 @@ PIXEL_RULES = """SCALE: the sprite is about {height} pixels tall, drawn pixel by
 sprite pixel is a crisp, perfectly square block of exactly {block}x{block} image pixels on one regular grid
 (nearest-neighbour: no smoothing, no blur, no anti-aliasing between blocks). Do NOT draw grid lines or pixel borders.
 PROPORTIONS for that size: about {heads} heads tall -- the head with hair about {head_px} pixels, a large face about
-{face_px} pixels wide, slim legs about {leg_px} pixels wide, small hands of a few pixels. A stylised game figure
-between chibi and realistic, NOT a tall realistic figure.
+{face_px} pixels wide, slim legs about {leg_px} pixels wide (the legs about 40% of the height), small hands of a few
+pixels. A stylised game figure: NOT chibi (a head of a third of the height or more is too big), and not a tall
+realistic figure either.
 PIXEL-ART RULES: a light, soft, high-key palette. Each material (skin, hair, each garment) uses 4-6 flat tones laid
 down as clean, deliberate clusters -- no gradients, no dithering, no noise. NO dark outline around the figure: its
 edges are soft, LIGHTER or slightly darker tones of the material itself; dark pixels only inside the design (lashes,
@@ -50,8 +51,9 @@ pupils, dark materials). Light from the top-left. Hair as large shaped masses wi
 highlight bands. The FACE is designed in pixels, simple and vivid: each eye a small shape of a dark lash line, an
 iris of 2-3 pixels with a 1-pixel highlight and a hint of white; a tiny mouth of 1-3 pixels; no nose; soft blush
 pixels if the character has them.
-A calm, readable figure: relaxed standing pose with the arms close to the body, props small and held close, {view}
-view, centered, full body. Plain flat light-grey background, no shadow, no text."""
+A calm, readable figure STANDING upright on both feet in a relaxed pose -- even if the reference sits, kneels or
+crouches -- with the arms close to the body, props small and held close, {view} view, centered, full body. NO
+furniture, bench, chair or other scenery objects. Plain flat light-grey background, no shadow, no text."""
 
 PIXEL_SPRITE = """Redraw the character in this image as an authentic hand-pixelled SPRITE for a 2D side-scrolling anime
 action game, in the style of modern hand-made pixel-art action platformers. Keep who the character is: hairstyle and

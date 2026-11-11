@@ -28,6 +28,18 @@ def proportion_check(ctx, img, labels, w, h):
     lo, hi = (float(v) for v in ccfg.get("heads_range", [4.0, 5.0]))
     ht = heads_tall(img, labels, w, h)
     ctx.info["heads_tall_measured"] = round(ht, 2) if ht else None
+    if ctx.cfg.get("finish", {}).get("mode") == "native":
+        # on pixel-art sprites the chin measurement slides into the neck and reads figures as too chibi (ref04: 3.1
+        # and 4.6 for practically the same proportions; ref10 2.0 when it is about 5, 2026-11-11), while the image
+        # model's proportions looked right and were rated 5: measured for information, never retried
+        if ht is not None:
+            ctx.info["proportions"] = f"measured {ht:.1f} heads tall (information only for pixel-art sprites)"
+        return
+    if ht is not None and not 2.5 <= ht <= 7.5:
+        # not a believable figure: something hides the chin (a plush toy held to the face read 2.07, ref09) or the
+        # face was found in the wrong place -- a retry on that would be a guess, so the concept is kept
+        ctx.info["proportions"] = f"measured {ht:.1f} heads tall, not believable; not retried"
+        return
     if ht is None or lo <= ht <= hi:
         return
     inputs = ctx.asset.state.inputs

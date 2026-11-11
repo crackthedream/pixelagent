@@ -769,7 +769,7 @@ function renderSettings() {
     <div class="group">
       <div class="setting"><div class="grow">Mode<div class="muted">Test runs use stand-in models: no cost, placeholder pictures.</div></div>
         <div class="segmented" id="st-mode">${[["openai", "OpenAI"], ["dry_run", "Test run"]].map(([v, l]) => `<button data-v="${v}" aria-pressed="${s.backend === v}">${l}</button>`).join("")}</div></div>
-      <div class="setting"><div class="grow">Look<div class="muted">Soft: big-headed anime game sprites with soft shading, made straight from the concept (about $0.25 a character). Classic: strict palette and outlines, drawn by the model (about $1.50).</div></div>
+      <div class="setting"><div class="grow">Look<div class="muted">Soft: hand-pixelled anime game sprites, drawn as pixel art from your reference or description (about $0.20 a character). Classic: strict palette and outlines, drawn by the model (about $1.50).</div></div>
         <div class="segmented" id="st-look">${[["soft", "Soft"], ["classic", "Classic"]].map(([v, l]) => `<button data-v="${v}" aria-pressed="${(s.look || "soft") === v}">${l}</button>`).join("")}</div></div>
       <div class="setting"><div class="grow">Default height<div class="muted">160 px gives faces enough pixels.</div></div>
         <div class="segmented" id="st-h">${[64, 96, 128, 160].map((v) => `<button data-v="${v}" aria-pressed="${Number(s.sprite_height) === v}">${v} px</button>`).join("")}</div></div>

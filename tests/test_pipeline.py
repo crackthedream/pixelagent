@@ -173,6 +173,10 @@ class PipelineTests(Base):
         a = self.proj.asset("pix")
         st = a.state.steps
         self.assertEqual(st["concept"].info["sources"], ["pixel sprite"])
+        prompt = rd(os.path.join(a.dir, st["concept"].info["dir"], "concept_prompt.txt"))
+        self.assertIn("STANDING upright", prompt)                                # seated references stand up
+        self.assertIn("furniture, bench, chair", prompt)
+        self.assertIn("NOT chibi", prompt)
         self.assertEqual(st["pixelize"].info["grid"]["p"], 8.0)                 # the block size drawn
         im, _ = synth.draw_character(seed=0, background=None)
         want = imaging.pixelize(im, 48, margin=0)

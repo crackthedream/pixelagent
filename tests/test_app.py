@@ -179,7 +179,7 @@ class AppServerTest(unittest.TestCase):
         self.ok(self.post("/api/settings", {"monthly_usd": 90, "sprite_height": 160}))   # the AIC-scale default
         o = self.ok(self.get("/api/overview"))
         self.assertEqual(o["settings"]["look"], "soft")                                   # the soft look by default
-        self.assertEqual(o["estimates"]["character"]["160"], 0.30)                        # no drawing step
+        self.assertEqual(o["estimates"]["character"]["160"], 0.20)                        # pixel art, no retry
         self.ok(self.post("/api/settings", {"look": "classic"}))
         self.assertEqual(self.ok(self.get("/api/overview"))["estimates"]["character"]["160"], 1.50)
         self.assertEqual(self.post("/api/settings", {"look": "fancy"})[0], 400)

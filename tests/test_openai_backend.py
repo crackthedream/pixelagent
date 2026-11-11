@@ -293,6 +293,30 @@ class OpenAIBackendTests(unittest.TestCase):
         self.assertIn("kept", a.state.steps["materials"].info["proportions"])
         self.assertEqual(a.state.steps["materials"].info["heads_tall_measured"], 6.0)
 
+    def test_pixel_art_proportions_are_measured_but_never_retried(self):
+        from unittest import mock
+        self.proj.config["finish"]["mode"] = "native"
+        flat = os.path.join(self.tmp, "flat.png")
+        synth.draw_character(seed=2, size=384, background=(200, 200, 204))[0].save(flat)
+        with mock.patch("pixelagent.face.heads_tall", return_value=3.1):
+            self.assertEqual(self._run("pix", {"references": [flat], "height": 40}), "complete")
+        a = self.proj.asset("pix")
+        self.assertEqual(a.state.steps["concept"].version, 1)
+        self.assertNotIn("proportion_retries", a.state.inputs)
+        self.assertIn("information only", a.state.steps["materials"].info["proportions"])
+
+    def test_an_implausible_proportion_reading_is_not_retried(self):
+        from unittest import mock
+        self.proj.config["finish"]["mode"] = "reduce"
+        flat = os.path.join(self.tmp, "flat.png")
+        synth.draw_character(seed=2, size=384, background=(200, 200, 204))[0].save(flat)
+        with mock.patch("pixelagent.face.heads_tall", return_value=2.07):   # a plush toy hiding the chin
+            self.assertEqual(self._run("plush", {"references": [flat], "height": 40}), "complete")
+        a = self.proj.asset("plush")
+        self.assertEqual(a.state.steps["concept"].version, 1)
+        self.assertNotIn("proportion_retries", a.state.inputs)
+        self.assertIn("not believable", a.state.steps["materials"].info["proportions"])
+
     def test_reduce_revision_masks_an_area_edit(self):
         self.proj.config["finish"]["mode"] = "reduce"
         flat = os.path.join(self.tmp, "flat.png")

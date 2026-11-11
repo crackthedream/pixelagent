@@ -126,6 +126,8 @@ LOOKS = {"soft": {"style": {"look": "soft", "outline": "soft"}, "finish": {"mode
 # the reduce finish (soft look) has no drawing step: plan, concept, material map, grid pick and critique, and one
 # proportion retry when the concept misses (~$0.14 without, ~$0.25 with one)
 REDUCE_CHARACTER = {"64": 0.30, "96": 0.30, "128": 0.30, "160": 0.30}
+# the native finish (pixel art) never retries the concept: plan, concept, material map, critique (~$0.15)
+NATIVE_CHARACTER = {"64": 0.20, "96": 0.20, "128": 0.20, "160": 0.20}
 ESTIMATES = {"character": {"64": 0.70, "96": 1.15, "128": 1.70, "160": 1.50}, "animation_base": 0.08, "animation_per_frame": 0.33,
              # revising the current drawing (a short session) instead of drawing it again (~$0.90)
              "revise_area": 0.20, "revise_whole": 0.35}
@@ -140,7 +142,8 @@ def estimates(settings=None):
         mode = load_config().get("finish", {}).get("mode", "artist")
     # animations: plan + pose sheet only (~$0.10), no per-frame drawing
     # revisions: one concept edit + material map + critique (~$0.12)
-    return ({**ESTIMATES, "character": REDUCE_CHARACTER, "animation_base": 0.15, "animation_per_frame": 0.0,
+    character = NATIVE_CHARACTER if mode == "native" else REDUCE_CHARACTER
+    return ({**ESTIMATES, "character": character, "animation_base": 0.15, "animation_per_frame": 0.0,
              "revise_area": 0.15, "revise_whole": 0.15}
             if mode in ("reduce", "native") else ESTIMATES)
 
