@@ -332,3 +332,17 @@ drawn strands, each eye a distinct pixel shape. The reduce finish gives a soft b
     measurement slides into the neck: ref04 read 3.1 and 4.6 for practically the same proportions, ref10 2.0 when
     she is about 5 heads. Most retries in both pixel-art batches came from misreadings, and the image model's
     proportions looked right and were rated 5. A pixel-art character now costs ~$0.15 (the app quotes $0.20).
+
+**Palette grade** (2026-11-11, `build.grade_colours`, `[finish] grade`, the app's Colours setting):
+- **Measured** in OKLab on opaque pixels:
+  - Alice in Cradle's characters (Noel and nine NPC atlases): mean chroma 0.013-0.059 (~0.033), 7-56% dark pixels
+    (L < 0.45). Dark designs stay dark there too: the consistent difference is saturation, plus lifted shadows.
+  - our ten native sprites: mean chroma 0.039-0.099 (0.063 on average), 1-50% dark.
+  - the darkness comes from the image model's drawing, not from the tone rebuild (drawn and final lightness agree
+    within 0.003).
+- **The grade:** a palette mapping, so every cluster stays exactly as drawn. Chroma is scaled, and tones below a
+  knee are lifted (0 at the knee, `lift` at black, order kept). Eyes, mouth and blush keep their drawn colours.
+- **Presets:** soft (0.8 chroma, +0.08), medium (0.65, +0.14, default), strong (0.5, +0.2); none switches it off.
+- **Result:** on eight sprites, medium moves mean chroma 0.063 -> 0.041 and dark pixels 32% -> 28%. The owner picked
+  medium over soft and strong (strong greys the skin and reds). ref05 through the pipeline: chroma 0.078 -> 0.051,
+  dark 43.6% -> 28.2%, still 37 colours. Animations inherit it: their frames map to the character's palette.

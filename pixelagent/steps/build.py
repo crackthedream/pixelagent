@@ -53,6 +53,46 @@ def _oklab(rgb):
                            [0.0259040371, 0.7827717662, -0.8086757660]]).T
 
 
+def _from_oklab(lab):
+    """OKLab (N, 3) -> sRGB (N, 3) uint8 (clipped to the gamut)."""
+    import numpy as np
+    lms = lab @ np.array([[1, 0.3963377774, 0.2158037573], [1, -0.1055613458, -0.0638541728],
+                          [1, -0.0894841775, -1.2914855480]]).T
+    c = (lms ** 3) @ np.array([[4.0767416621, -3.3077115913, 0.2309699292],
+                               [-1.2684380046, 2.6097574011, -0.3413193965],
+                               [-0.0041960863, -0.7034186147, 1.7076147010]]).T
+    c = np.clip(c, 0, 1)
+    c = np.where(c <= 0.0031308, 12.92 * c, 1.055 * c ** (1 / 2.4) - 0.055)
+    return np.clip(np.round(c * 255), 0, 255).astype(np.uint8)
+
+
+# Palette grades of the native finish ([finish] grade). The image model's sprites are about twice as saturated as
+# Alice in Cradle's characters (mean OKLab chroma 0.063 vs 0.013-0.059, ~0.033 on average) and their shadows run to
+# near-black; the game's colours are dusty with lifted shadows (2026-11-11, docs/FACE_ROOT_CAUSE.md). chroma scales
+# the colourfulness; lift raises the darkest tones (0 at L >= knee, `lift` at black), keeping their order.
+GRADES = {"none": None, "soft": dict(chroma=0.8, lift=0.08, knee=0.55),
+          "medium": dict(chroma=0.65, lift=0.14, knee=0.6), "strong": dict(chroma=0.5, lift=0.2, knee=0.65)}
+
+
+def grade_colours(rgb, chroma=0.65, lift=0.14, knee=0.6):
+    """Colours (N, 3) -> graded colours (N, 3) uint8: less saturated, shadows lifted (a palette mapping: every pixel
+    of one colour stays one colour, so the clusters are kept exactly)."""
+    import numpy as np
+    lab = _oklab(np.asarray(rgb, float))
+    t = np.clip(1 - lab[:, 0] / knee, 0, 1)
+    lab[:, 0] += lift * t ** 1.5
+    lab[:, 1:] *= chroma
+    return _from_oklab(lab)
+
+
+def grade_setting(ctx):
+    """The palette grade for this run: [finish] grade (default 'medium') in the native finish, none otherwise."""
+    if finish_mode(ctx) != "native":
+        return None
+    name = str(ctx.cfg.get("finish", {}).get("grade", "medium"))
+    return GRADES.get(name, GRADES["medium"])
+
+
 def _kmeans(x, k, iters=12):
     """Small k-means in OKLab, seeded along lightness so dark lines and highlights get their own centres."""
     import numpy as np
@@ -120,6 +160,7 @@ def soft_reduce(ctx):
     src = np.asarray(base).reshape(-1, 4)
     budget = int(ctx.cfg.get("finish", {}).get("reduce_colors", 96))
     native = finish_mode(ctx) == "native"
+    grade = grade_setting(ctx)
     groups = {}
     for k, m in enumerate(labels):
         if src[k, 3]:
@@ -133,6 +174,12 @@ def soft_reduce(ctx):
         focal = is_focal(m)
         k = native_tones(m, len(ix)) if native else max(6 if focal else 2, round(budget * weight[m] / total))
         colours, cols = reduce_material(src[ix, :3].astype(float), k, focal)
+        if grade and not focal and cols:              # the face (eyes, mouth, blush) keeps its drawn colours
+            uniq = np.array(cols, np.uint8)
+            graded = grade_colours(uniq, **grade)
+            look = {tuple(int(v) for v in u): g for u, g in zip(uniq, graded)}
+            colours = np.array([look[tuple(int(v) for v in c)] for c in colours], np.uint8)
+            cols = list(graded)
         out[ix, :3] = colours
         out[ix, 3] = 255
         for j, col in enumerate(cols):
@@ -155,7 +202,8 @@ def soft_reduce(ctx):
     doc.palette = palette
     ctx.save_project("project", doc)
     ctx.save_image("preview", "rebuild.png", imaging.from_bytes(w, h, doc.composite()))
-    ctx.info.update(mode=finish_mode(ctx), colors=len(palette), colors_per_material=counts, specks_merged=merged)
+    ctx.info.update(mode=finish_mode(ctx), colors=len(palette), colors_per_material=counts, specks_merged=merged,
+                    grade=str(ctx.cfg.get("finish", {}).get("grade", "medium")) if grade else "none")
 
 
 def rebuild(ctx):

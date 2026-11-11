@@ -184,6 +184,14 @@ class AppServerTest(unittest.TestCase):
         self.assertEqual(self.ok(self.get("/api/overview"))["estimates"]["character"]["160"], 1.50)
         self.assertEqual(self.post("/api/settings", {"look": "fancy"})[0], 400)
         self.ok(self.post("/api/settings", {"look": "soft"}))
+        self.assertEqual(self.ok(self.get("/api/overview"))["settings"]["grade"], "medium")   # dusty colours by default
+        self.assertEqual(self.post("/api/settings", {"grade": "neon"})[0], 400)
+        self.ok(self.post("/api/settings", {"grade": "strong"}))
+        self.assertEqual(self.ok(self.get("/api/overview"))["settings"]["grade"], "strong")
+        from pixelagent.app.server import overrides
+        self.assertEqual(overrides({**self.ok(self.get("/api/overview"))["settings"], "grade": "none"})["finish"],
+                         {"mode": "native", "grade": "none"})
+        self.ok(self.post("/api/settings", {"grade": "medium"}))
         self.assertEqual(self.ok(self.get("/api/overview"))["settings"]["sprite_height"], 160)
         self.ok(self.post("/api/settings", {"monthly_usd": 90, "sprite_height": 96}))
 

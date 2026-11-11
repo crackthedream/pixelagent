@@ -188,11 +188,40 @@ class PipelineTests(Base):
         self.assertLessEqual(max(diff), 3)                                       # pixel for pixel
         self.assertTrue(all(1 <= k <= 6 for k in st["rebuild"].info["colors_per_material"].values()))   # 3-6 (fewer if a material has fewer colours)
         self.assertEqual(st["rebuild"].info["mode"], "native")
+        self.assertEqual(st["rebuild"].info["grade"], "medium")                # dusty palette, lifted shadows
+        from pixelagent.steps.build import _oklab
+        import numpy as np
+
+        def chroma(img):
+            px = np.asarray(img.convert("RGBA")).reshape(-1, 4)
+            lab = _oklab(px[px[:, 3] > 0, :3].astype(float))
+            return np.hypot(lab[:, 1], lab[:, 2]).mean()
+        self.assertLess(chroma(imaging.load_rgba(a.output("export", "png"))), chroma(got) * 0.85)
         self.assertEqual((st["lines"].status, st["detail"].status), ("skipped", "skipped"))
         oc = self.proj.config["style"]["outline_color"]
         oc = tuple(int(oc[i:i + 2], 16) for i in (1, 3, 5))
         data = imaging.to_bytes(imaging.load_rgba(a.output("export", "png")))
         self.assertNotIn(oc, {tuple(data[k:k + 3]) for k in range(0, len(data), 4) if data[k + 3]})
+
+    def test_palette_grade_mutes_colours_and_lifts_shadows_in_order(self):
+        import numpy as np
+        from pixelagent.steps.build import GRADES, _oklab, grade_colours
+        rng = np.random.default_rng(1)
+        cols = rng.integers(0, 256, (400, 3)).astype(np.uint8)
+        lab0 = _oklab(cols.astype(float))
+        for name in ("soft", "medium", "strong"):
+            lab = _oklab(grade_colours(cols, **GRADES[name]).astype(float))
+            c0, c1 = np.hypot(lab0[:, 1], lab0[:, 2]), np.hypot(lab[:, 1], lab[:, 2])
+            self.assertLess(c1.mean(), c0.mean() * 0.85, name)              # less saturated
+            self.assertGreaterEqual(lab[:, 0].min(), lab0[:, 0].min(), name)  # shadows not darker
+            dark = lab0[:, 0] < 0.3
+            self.assertGreater((lab[dark, 0] - lab0[dark, 0]).mean(), 0.02, name)   # lifted
+            o0, o1 = np.argsort(lab0[:, 0]), lab[np.argsort(lab0[:, 0]), 0]
+            self.assertGreaterEqual(np.diff(o1).min(), -0.02, name)          # tones keep their order
+        greys = np.array([[0, 0, 0], [128, 128, 128], [255, 255, 255]], np.uint8)
+        g = grade_colours(greys, **GRADES["medium"])
+        self.assertTrue(all(abs(int(c[0]) - int(c[2])) <= 1 for c in g))   # greys stay grey
+        self.assertEqual(tuple(g[2]), (255, 255, 255))                     # white stays white
 
     def test_native_area_revision_keeps_the_grid_and_the_rest(self):
         self.proj.new_asset("pix", {"references": [self.ref], "height": 48})
