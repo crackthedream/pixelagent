@@ -471,3 +471,9 @@ rated by the owner):
   face one key, so rating one cleared the other. Fixed (`validation_round.py`, keys carry the kind).
 - **The owner's view after rating** (2026-11-12): animations made from one static illustration may not be worth
   having; a few expressions may be enough.
+
+**The face check, calibrated to the owner** (2026-11-12, `expressions.passes`, `[expressions] fail_on`): only "does
+not read" and "the skin changed" (the vision finding or the measured share of skin kept) fail a face and cost a
+second drawing. The hair and eye-colour findings are recorded and shown as a note. Of the 19 faces of the second
+round with a stored check, 9 failed under the old rule and none fails under the new one. Not yet run with the real
+models: the saving (a face back from about $0.10 to $0.06) is the expected one.

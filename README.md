@@ -155,10 +155,11 @@ you describe ("a smug half-smile with one brow raised"). The vision model finds 
 the image model redraws only that area of the pixel-art concept, and it is read back on the character's own grid and
 graded like it. Only the face changes, pixel for pixel; the fringe and side locks inside the face area are out of
 bounds, and a skin tone the edit shifted is moved back. Each face is then checked against the neutral one (reads as
-asked, same skin, same hair, same iris colour and eye style) and drawn once more with the findings when it fails;
-the better attempt is kept and a failed check is shown on the face. Each comes as a whole sprite and as a face patch
+asked, same skin, same hair, same iris colour and eye style). A face that does not read or whose skin changed is
+drawn once more with the findings, and the better attempt is kept; a failed check is shown on the face. The hair and
+eye findings are notes only (`[expressions] fail_on`): they failed the faces the owner rated highest. Each comes as a whole sprite and as a face patch
 with its box (`expressions/expressions.json`) for games that swap faces. About $0.06 a face, twice that when it is
-drawn again. In the app: the character's Expressions card; in code:
+drawn again (rare since the hair and eye findings became notes). In the app: the character's Expressions card; in code:
 `pixelagent.expressions.make(project, id, names, custom={"smug": "a smug half-smile"})`.
 
 ## Objects

@@ -509,3 +509,4 @@ p.small { font-size: 11px; margin: 8px 0 0; }
 .px-wide { image-rendering: pixelated; image-rendering: crisp-edges; }
 
 .expr-warn { color: var(--orange, #c93400); font-weight: 500; cursor: help; }
+.expr-note { color: var(--text-3); cursor: help; }

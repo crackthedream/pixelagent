@@ -451,7 +451,7 @@ function inspector(d) {
     const ex = d.expressions || [];
     html += `<div class="card"><h2>Expressions</h2>
       ${ex.length ? `<div class="expr-grid">${ex.map((e) => `<figure class="expr"><a class="stage" href="${esc(e.x4)}" target="_blank" rel="noopener" title="${esc(e.note || "Open the whole sprite at 4×")}">${stageImg(e.face, e.name)}</a>
-        <figcaption>${esc(e.name)} <a href="${esc(e.url)}" download>PNG</a> <a href="${esc(e.face)}" download>Face</a>${e.passed === false ? `<span class="expr-warn" title="${esc(e.issue || "This face did not pass its check against the original.")}">Check this face</span>` : ""}</figcaption></figure>`).join("")}</div>`
+        <figcaption>${esc(e.name)} <a href="${esc(e.url)}" download>PNG</a> <a href="${esc(e.face)}" download>Face</a>${e.passed === false ? `<span class="expr-warn" title="${esc(e.issue || "This face did not pass its check against the original.")}">Check this face</span>` : e.issue ? `<span class="expr-note" title="${esc(e.issue)}">Note</span>` : ""}</figcaption></figure>`).join("")}</div>`
         : `<p class="muted" style="margin:0 0 10px">The same sprite with another face: happy, sad, angry, or any face you describe. Only the face changes, so a game can swap the face alone.</p>`}
       <button class="btn" id="btn-expr" style="margin-top:8px">${icon("plus")}${ex.length ? "Make more" : "Make expressions"}</button></div>`;
   }

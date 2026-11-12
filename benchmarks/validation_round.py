@@ -260,7 +260,8 @@ def sheet(a):
                 chk = e.get("check") or {}
                 auto = "" if "passed" not in e else (
                     "Auto-check passed" if e["passed"] else "Auto-check failed: " + html.escape(chk.get("issue") or "the skin changed")
-                ) + (", drawn twice" if e.get("attempts", 1) > 1 else "")
+                ) + (", drawn twice" if e.get("attempts", 1) > 1 else "") + (
+                    ". Note: " + html.escape(chk["issue"]) if e["passed"] and chk.get("issue") else "")
                 faces.append(f'<figure class="card"><figcaption>{html.escape(name)} <small>{e.get("pixels_changed", "?")} px changed'
                              f'</small></figcaption><div class="stage"><img class="px" data-zoom="8" src="{rel(crop)}" '
                              f'alt="{html.escape(name)} face"></div><details><summary>Whole sprite</summary><img class="px" '

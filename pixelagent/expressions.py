@@ -6,8 +6,9 @@ colours (the palette grade included). Only pixels inside the face box and inside
 outline and the rest of the sprite stay pixel for pixel: a game can swap the whole sprite or just the face patch.
 
 An expression is a preset (EXPRESSIONS) or any description of the user's own. Each drawn face is checked against the
-neutral one (the skin kept, and a vision check: reads as asked, same skin, hair and eye style) and drawn once more
-with the findings as a note when it fails; the better attempt is kept.
+neutral one (the skin kept, and a vision check: reads as asked, same skin, hair and eye style). A face that does
+not read or whose skin changed is drawn once more with the findings as a note, and the better attempt is kept; the
+hair and eye findings are notes only ([expressions] fail_on).
 
 Outputs, in the character's folder: expressions/<name>.png (1x), <name>_x4.png, <name>_face.png (the face patch) and
 expressions.json (the face box, so a game can place the patch)."""
@@ -259,9 +260,14 @@ def _score(check):
     return sum(bool(check.get(k)) for k in ("reads", "same_skin", "same_hair", "eyes_in_style")) + check.get("skin_kept", 0)
 
 
-def passes(check, min_skin=0.5):
-    return all(check.get(k, True) for k in ("reads", "same_skin", "same_hair", "eyes_in_style")) \
-        and check.get("skin_kept", 1.0) >= min_skin
+FAIL_ON = ("reads", "same_skin")
+
+
+def passes(check, min_skin=0.5, fail_on=FAIL_ON):
+    """Does a face pass its check? Only the findings in `fail_on` ([expressions] fail_on) and the measured share of
+    skin kept can fail it. The hair and eye-colour findings are notes: they failed faces the owner rated highest
+    (ref08's six, rated 4.5 of 5, all failed for the fringe), and each failure cost a second drawing."""
+    return all(check.get(k, True) for k in fail_on) and check.get("skin_kept", 1.0) >= min_skin
 
 
 def make(proj, aid, names=None, log=print, mode=None, reuse=False, custom=None, relocate=False):
@@ -295,6 +301,10 @@ def make(proj, aid, names=None, log=print, mode=None, reuse=False, custom=None, 
         raise ValueError("the finished sprite does not line up with its readback: redo the character first")
     backend = make_backend(proj, aid, mode)
     ecfg = proj.config.get("expressions", {})
+    fail_on = tuple(ecfg.get("fail_on", FAIL_ON))
+    unknown = [k for k in fail_on if k not in ("reads", "same_skin", "same_hair", "eyes_in_style")]
+    if unknown:
+        raise ValueError(f"[expressions] fail_on: unknown finding {', '.join(unknown)}")
     out_dir = os.path.join(a.dir, "expressions")
     path = os.path.join(out_dir, "expressions.json")
     earlier = {}
@@ -391,7 +401,7 @@ def make(proj, aid, names=None, log=print, mode=None, reuse=False, custom=None, 
             cand = {"sprite": sprite, "changed": changed, "check": check, "attempt": k + 1}
             if best is None or _score(check) >= _score(best["check"]):   # a tie: the attempt that had the note
                 best = cand
-            if passes(check, float(ecfg.get("min_skin_kept", 0.5))):
+            if passes(check, float(ecfg.get("min_skin_kept", 0.5)), fail_on):
                 break
             note = check.get("issue") or "the skin of the face changed colour: keep the skin exactly as it is"
             log(f"[expressions] {n}: {note}" + ("" if reuse else " (drawing it once more)" if k == 0 else ""))
@@ -402,7 +412,7 @@ def make(proj, aid, names=None, log=print, mode=None, reuse=False, custom=None, 
         result["expressions"][n] = {"png": f"{n}.png", "png_x4": f"{n}_x4.png", "face": f"{n}_face.png",
                                     "note": text, "pixels_changed": best["changed"], "custom": n in custom,
                                     "check": best["check"], "attempts": k + 1, "kept_attempt": best["attempt"],
-                                    "passed": passes(best["check"], float(ecfg.get("min_skin_kept", 0.5)))}
+                                    "passed": passes(best["check"], float(ecfg.get("min_skin_kept", 0.5)), fail_on)}
         with open(path, "w", encoding="utf-8") as f:
             json.dump(result, f, indent=1)
     return result

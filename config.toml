@@ -129,6 +129,8 @@ effort = "medium"
 [expressions]
 retries = 1                  # a face that fails its check is drawn once more with the findings (the better one kept)
 judge = true                 # vision check of each face against the neutral one (~$0.003)
+fail_on = ["reads", "same_skin"]   # the findings that fail a face. "same_hair" and "eyes_in_style" are notes only:
+                             # the 12 faces they failed, the owner rated 4.5 of 5; the 13 that passed, 4.15 (2026-11-12)
 min_skin_kept = 0.5          # the share of the face's main skin colour that must stay as it was
 
 [animation]

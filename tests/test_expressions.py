@@ -99,8 +99,12 @@ class ExpressionTests(unittest.TestCase):
             safe_name("!!!")
         ok = {"reads": True, "same_skin": True, "same_hair": True, "eyes_in_style": True, "skin_kept": 0.8}
         self.assertTrue(passes(ok))
-        self.assertFalse(passes({**ok, "eyes_in_style": False}))
+        self.assertFalse(passes({**ok, "reads": False}))
+        self.assertFalse(passes({**ok, "same_skin": False}))
         self.assertFalse(passes({**ok, "skin_kept": 0.2}))
+        # hair and eye findings are notes: they failed the faces the owner rated highest
+        self.assertTrue(passes({**ok, "eyes_in_style": False, "same_hair": False}))
+        self.assertFalse(passes({**ok, "same_hair": False}, fail_on=("reads", "same_skin", "same_hair")))
         self.assertTrue(passes({"skin_kept": 0.9}))                              # no vision check: the skin alone
 
 
@@ -117,6 +121,31 @@ class ExpressionRunTests(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.tmp, ignore_errors=True)
 
+    def test_hair_and_eye_findings_are_notes_and_cost_no_second_drawing(self):
+        from pixelagent import models
+        real, drawn = models.StubImages.generate, []
+
+        def judge(backend, neutral, face, text, out_path):
+            return expressions.FaceCheck(reads=True, same_skin=True, same_hair=False, eyes_in_style=False,
+                                         issue="The fringe has changed shape, and the irises are bluer.")
+
+        def generate(self_, *a, **k):
+            drawn.append(1)
+            return real(self_, *a, **k)
+        with mock.patch.object(expressions, "judge", judge), mock.patch.object(models.StubImages, "generate", generate):
+            e = expressions.make(self.proj, "hero", ["happy"], log=lambda *_: None)["expressions"]["happy"]
+        self.assertEqual((len(drawn), e["attempts"], e["passed"]), (1, 1, True))
+        self.assertIn("fringe", e["check"]["issue"])                               # kept as a note
+        self.assertFalse(e["check"]["same_hair"] or e["check"]["eyes_in_style"])
+        # the setting can make them count again
+        self.proj.config.setdefault("expressions", {})["fail_on"] = ["reads", "same_skin", "same_hair"]
+        with mock.patch.object(expressions, "judge", judge), mock.patch.object(models.StubImages, "generate", generate):
+            e = expressions.make(self.proj, "hero", ["sad"], log=lambda *_: None)["expressions"]["sad"]
+        self.assertEqual((e["attempts"], e["passed"]), (2, False))
+        self.proj.config["expressions"]["fail_on"] = ["hair"]
+        with self.assertRaises(ValueError):
+            expressions.make(self.proj, "hero", ["blink"], log=lambda *_: None)
+
     def test_your_own_expression_and_a_retry_after_a_failed_check(self):
         calls, prompts_seen, sizes = [], [], []
         shared = self.proj.config["images"].get("draft_size")
@@ -124,8 +153,8 @@ class ExpressionRunTests(unittest.TestCase):
         def judge(backend, neutral, face, text, out_path):
             calls.append(text)
             bad = len(calls) == 1
-            return expressions.FaceCheck(reads=True, same_skin=True, same_hair=True, eyes_in_style=not bad,
-                                         issue="the eyes turned red" if bad else "")
+            return expressions.FaceCheck(reads=not bad, same_skin=True, same_hair=True, eyes_in_style=True,
+                                         issue="the mouth is a flat line, not a smile" if bad else "")
         from pixelagent import models
         real = models.StubImages.generate
 
@@ -140,7 +169,7 @@ class ExpressionRunTests(unittest.TestCase):
         e = r["expressions"]["smug"]
         self.assertEqual((e["attempts"], e["kept_attempt"], e["passed"], e["custom"]), (2, 2, True, True))
         self.assertIn("smug half-smile", prompts_seen[0])
-        self.assertIn("the eyes turned red", prompts_seen[1])
+        self.assertIn("the mouth is a flat line, not a smile", prompts_seen[1])
         with Image.open(self.proj.asset("hero").output("concept", "concept")) as c:
             want = f"{c.width}x{c.height}"
         # the concept's size goes with each call; the project's shared image size is never changed

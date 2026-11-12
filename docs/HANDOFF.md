@@ -713,9 +713,9 @@ rates alike, and the results need no manual fixes. Faces already meet it on four
 
 ### Next: characters
 1. **Text-only characters and their faces, rated by the owner**, then a second run of the set for repeatability.
-1c. **Calibrate the automatic face check to the owner** (it failed ref08 six times for a fringe the owner rated
-   4.5). Candidates: hair and eye colour as notes only, a redraw only when the face does not read or the skin
-   changed. This would bring a face back from about $0.10 to $0.06.
+1c. Done 2026-11-12: the automatic face check is calibrated to the owner. Hair and eye colour are notes only; a
+   redraw happens when the face does not read or the skin changed (`[expressions] fail_on`). Expected: a face back
+   from about $0.10 to $0.06; confirm on the next paid round.
 1a. **Text-only characters** have no owner ratings yet (all ten rated characters came from reference images).
 1b. **A standing base sprite** for a seated or lying reference, or a question to the user, before animating.
 2. **Steering single pieces:** redo one animation frame or one expression with a note (the frames are separate
