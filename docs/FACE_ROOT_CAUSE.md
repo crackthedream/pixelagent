@@ -379,3 +379,95 @@ drawn strands, each eye a distinct pixel shape. The reduce finish gives a soft b
 - **First set** (ref05, six faces, $0.327, ~4 min): happy, sad, angry, surprised, hurt and blink all read clearly
   as pixel-art faces; 135-207 pixels changed each, hair and outline untouched. The redrawn faces are simpler and
   more frontal than the original three-quarter face.
+
+## Validation round on four more characters (2026-11-12)
+
+`bench_runs_validate`: ref01, ref03, ref08 and ref10 with today's colours, six moves and six faces each ($2.97, no
+failures), on a rating sheet (`benchmarks/validation_round.py sheet`). The owner has not rated it; the findings below
+are measured, and the fixes are in the code. The second round on the fixed code is at the end of this section.
+
+**Moves that came out small.** Five of 24 moves were 74-89% of the character's height. Two causes:
+- *Coarse pixels (the real defect).* A six-frame sheet at 1536 px gives a 57-px-wide sprite blocks of 3 image
+  pixels. Asked for 3, the image model drew 4 on three of nine such sheets (3.6 on a fourth): the figure has the
+  layout's size on the sheet, but only 3/4 of its pixels, and soft detail. The block grid shows it (drawn block /
+  asked block = 1.33) together with the silhouette's area (0.76 of the sprite's).
+- *The pose.* ref08's run, jump and attack are 83-89% tall on the asked grid (grid 1.0-1.03, area 0.92-0.93): a
+  lean and a crouch. These are left alone.
+- **Fixes** (`steps/anim.py`): `sheet_plan` takes a sheet twice as wide (`[animation] sheet_wide = "3072x1024"`)
+  when the blocks would be under `min_block = 5`. ref01's run on it: 6-px blocks, frames 120 px for 127, far more
+  detail, $0.059 (the normal sheet: $0.069). `too_coarse` (grid > 1.15 and area < 0.90) draws the sheet once
+  more with a note and keeps the better one. What remains above grid 1.06 with area under 0.94 is read on the
+  asked grid (`read_pixel_frames(..., sprite=)`): the right size, with some doubled pixels. Height alone still
+  never enlarges a frame.
+
+**A seated reference.** ref10 sits on a bench. Idle, attack and hurt stay seated; walk, run and jump stand up and
+lose the bench. Open: the agent needs a standing base sprite (or to ask) before it animates a seated character.
+
+**Faces.** The vision check on the large drawings failed 20 of 26 drawings of ref01, ref08 and ref10 (first attempts
+and retries, most of them made with the first prompt). What it found:
+- *Skin tone.* ref08's sad and hurt faces repainted the skin tan. `expressions.skin_fix` measures the shift of the
+  face's main colour (the median of what was drawn in its place) and moves the drawn tones back; any pixel within
+  0.02 OKLab of the original is the original pixel, because an image model never returns a colour exactly.
+- *Iris colour.* Green eyes became red, brown or purple on most first attempts. The face locator now names the
+  iris colour and the prompt states it (second round below).
+- *Fringe.* Half of the faces reshaped the fringe. `expressions.hair_zone` takes the hair's colours from the rows
+  above the face box and puts the fringe and side locks, followed from the box's edges, out of bounds.
+- *The check and the retry.* `expressions.judge` shows the vision model the neutral and the new face as crops of
+  the large drawings and asks four things: reads as asked, same skin, same hair, same eye style. On the 1x faces it
+  misjudged eye colours and failed good faces (ref01's angry retry kept its green eyes and was failed); on the large
+  drawings its findings matched the drawings compared by eye (ref01's angry, surprised and smug). A failed face is
+  drawn once more with the finding as a note. Trials: 1 of 7 hard faces passed with the check on the 1x faces, 3 of
+  4 with the check on the large drawings and the fringe out of bounds.
+- **Your own expression:** `make(..., custom={"smug": "a smug half-smile with one brow raised"})`, the app's "Your
+  own" field. ref01's smug face passed on its second attempt.
+- Cost: $0.06 a face, $0.12 when it is drawn twice. In the last trial 3 of 4 first attempts failed, all three on
+  the iris colour, which the named colour is meant to prevent.
+
+**Second round on the fixed code** (`bench_runs_validate2`, 2026-11-12; rating sheet `rating.html`, 49 items, not yet
+rated by the owner):
+- *Moves* (ref01, ref03, ref08, ref06; 24 moves, $1.48, $0.062 each). Every move of five or more frames took the
+  wide sheet. Silhouette scale 0.91-1.04 on all 24 (first round: 0.74-1.00); six were read back a little larger
+  (grid 1.07-1.15), two a little smaller. One sheet came out coarse (ref08's run, grid 1.32), was drawn again and
+  the second kept (grid 1.12, area 0.97). By eye the figures match the sprites' size and design on all four.
+- *Touching figures.* ref08's attack had a figure cut in two: three figures touched through a held pouch, and the
+  cutter halved the merged piece. `imaging.split_sheet` now cuts a merged piece at its thinnest columns near where
+  a figure of the usual width ends. The stored sheet, cut again, gives five whole frames.
+- *Faces* (ref01, ref03, ref08, ref10; 25 faces, $2.46, about $0.10 each because 19 were drawn twice). 13 of 25
+  passed the check: ref01 5 of 6, ref10 5 of 6, ref03 3 of 7, ref08 0 of 6. By eye: ref01 and ref10 keep their
+  green and amber eyes in the open-eyed faces (red, brown or blank white in the first round) and their fringes;
+  ref03's angry, surprised and smug eyes are a stronger blue than its grey-blue original; ref08, a three-quarter
+  face under a heavy side-swept fringe, has its fringe reshaped in every face.
+- *Naming the iris colour* helps where the name is exact (green, amber) and hurts where it is not: the locator
+  called ref03's grey-blue eyes "blue" and the edits painted them blue. The prompt now says the irises keep the
+  colours of the original image, with the name as a hint and "not brighter, not more saturated" (untested).
+- *A bug in the first attempt at this round.* `validation_round.py` ran moves and faces side by side on one Project,
+  and both changed `[images] draft_size` on its shared settings: 23 of 25 faces were drawn at the pose sheet's
+  size (3072x1024 for a 1024x1536 concept) and came back squeezed ($2.25 lost). `images.generate` now takes the
+  size with each call; the animation and expression steps no longer touch the shared setting, and the script loads
+  the project once per job. The app already loads the project per job.
+- *The face box is kept.* Adding ref03's smug face located the face again, one pixel off, and dropped the six
+  faces made before from `expressions.json`. `make` now keeps the stored box (`relocate=True` starts afresh).
+- **Open:** three-quarter faces under a fringe (ref08); the seated reference (ref10's moves); text-only characters.
+
+**The owner's ratings of the second round** (2026-11-12, 1-5; `benchmarks/validation_ratings.csv`):
+
+| | Faces | Moves |
+|---|---|---|
+| ref01 | 4.17 (6) | 2.2 (5), "pose wrong" on attack, run, walk and hurt |
+| ref03 | 4.57 (7, with the described "smug" face at 4) | 4.0 (5) |
+| ref06 | | 4.0 (6) |
+| ref08 | 4.5 (6) | 4.0 (5) |
+| ref10 | 4.0 (6) | |
+| All | **4.32** (25), lowest 3 | **3.57** (21), lowest 2 |
+
+- **Faces meet the bar** set for character generation (average at least 4, nothing below 3) on these four.
+- **The automatic face check does not follow the owner's ratings.** The 12 faces it failed average 4.5; the 13 it
+  passed average 4.15. ref08, failed six times out of six for its fringe, is rated 4.5; ref03's "bluer" eyes are
+  rated 5, 5 and 4. Its hair and eye-colour findings are stricter than the owner, and each one costs a second
+  drawing. It confirms the 2026-11-10 finding: faces are judged by the owner, not by a model.
+- **Moves are uneven.** Three characters are at 4.0. ref01, drawn facing the viewer and waving, is at 2.2 with
+  "pose wrong": a side-view walk or run cannot come from a front-facing sprite without redesigning the figure.
+- The ratings of the hurt MOVE of ref01, ref03 and ref08 are missing: the sheet gave the hurt move and the hurt
+  face one key, so rating one cleared the other. Fixed (`validation_round.py`, keys carry the kind).
+- **The owner's view after rating** (2026-11-12): animations made from one static illustration may not be worth
+  having; a few expressions may be enough.

@@ -7,6 +7,7 @@ import shutil
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 import numpy as np
 from types import SimpleNamespace as NS
@@ -182,6 +183,112 @@ class AnimationTests(unittest.TestCase):
                 f0[f0[..., 3] == 0] = 0                   # transparent pixels: RGB does not matter
                 sp0[sp0[..., 3] == 0] = 0
                 self.assertTrue(np.array_equal(f0, sp0))
+
+    def test_coarse_pixels_are_read_back_at_the_sprites_size(self):
+        # asked for 6-px blocks the image model drew 8-px ones: the figure has the layout's size on the sheet but
+        # only 3/4 of its pixels. The grid and the silhouette's area show it (a pose would keep the grid)
+        from PIL import Image
+        from pixelagent.steps.anim import read_pixel_frames, too_coarse
+        sprite = imaging.load_rgba(self.proj.asset("hero").output("export", "png"))
+        sprite = sprite.crop(sprite.getbbox())
+        block, n = 6, 4
+        small = sprite.resize((round(sprite.width * 0.75), round(sprite.height * 0.75)), Image.NEAREST)
+        big = small.resize((small.width * 8, small.height * 8), Image.NEAREST)
+        sheet = Image.new("RGBA", (n * (big.width + 64), big.height + 80), (222, 222, 226, 255))
+        boxes = []
+        for i in range(n):
+            x = 32 + i * (big.width + 64)
+            sheet.alpha_composite(big, (x, 40))
+            boxes.append((x, 40, x + big.width, 40 + big.height))
+        frames, _, info = read_pixel_frames(sheet, boxes, block, sprite.height)
+        self.assertLessEqual(abs(frames[0].height - small.height), 1)      # without the sprite: as drawn (0.75x)
+        frames, s, info = read_pixel_frames(sheet, boxes, block, sprite.height, sprite=sprite)
+        self.assertTrue(info["enlarged"] and info["resized"], info)
+        self.assertGreater(info["grid"], 1.25)
+        self.assertLess(info["area"], 0.8)
+        self.assertTrue(too_coarse(info))
+        for f in frames:
+            self.assertLessEqual(abs(f.height - sprite.height), 2, f.size)
+        self.assertAlmostEqual(s, block, delta=0.3)
+        # the same sprite on the asked grid: nothing to correct, and a smaller figure on that grid is a pose
+        ok = sprite.resize((sprite.width * block, sprite.height * block), Image.NEAREST)
+        sheet = Image.new("RGBA", (n * (ok.width + 60), ok.height + 80), (222, 222, 226, 255))
+        boxes = [(30 + i * (ok.width + 60), 40, 30 + i * (ok.width + 60) + ok.width, 40 + ok.height) for i in range(n)]
+        for bx in boxes:
+            sheet.alpha_composite(ok, (bx[0], 40))
+        _, _, info = read_pixel_frames(sheet, boxes, block, sprite.height, sprite=sprite)
+        self.assertFalse(info["resized"] or too_coarse(info), info)
+
+    def test_a_coarse_pose_sheet_is_drawn_once_more(self):
+        # the first sheet comes back with pixels a third too large: the step draws it again and keeps the better one
+        from pixelagent import models
+        from pixelagent.steps import anim
+        sprite = imaging.load_rgba(self.proj.asset("hero").output("export", "png"))
+        real, calls, sizes = models.StubImages.generate, [], []
+        shared = self.proj.config["images"].get("draft_size")
+
+        def generate(self_, role, prompt, n, out_dir, refs=None, stub=None, quality=None, mask=None, size=None):
+            paths = real(self_, role, prompt, n, out_dir, refs, stub, quality, mask, size)
+            calls.append(prompt)
+            sizes.append((size, self_.cfg["images"].get("draft_size")))
+            if len(calls) == 1 and "hand-pixelled" in prompt:
+                from PIL import Image
+                block = int(prompt.split("block of exactly ")[1].split("x")[0])
+                sp = sprite.crop(sprite.getbbox())
+                small = sp.resize((round(sp.width * 0.75), round(sp.height * 0.75)), Image.NEAREST)
+                anim.layout_sheet(small, 4, block * 4 // 3, size).convert("RGB").save(paths[0])
+            return paths
+        with mock.patch.object(models.StubImages, "generate", generate):
+            pipe = self._anim("hero-coarse", "bob", 4)
+            self.assertEqual(pipe.run(auto_approve=True, log=quiet), "complete")
+        a = self.proj.asset("hero-coarse")
+        check = a.state.steps["anim_poses"].info["sheet_check"]
+        self.assertEqual(check["attempts"], 2, check)
+        self.assertFalse(check["coarse"])
+        self.assertGreater(check["kept"]["area"], 0.97)
+        self.assertIn("too large", calls[1])
+        # the sheet's size goes with each call; the project's shared image size is never changed
+        self.assertTrue(all(sz == sizes[0][0] and cfg == shared for sz, cfg in sizes), sizes)
+        self.assertRegex(sizes[0][0], r"^\d+x1024$")
+        sp = sprite.crop(sprite.getbbox())
+        f = imaging.load_rgba(a.output("anim_draw", "frame0"))
+        self.assertEqual(f.crop(f.getbbox()).size, sp.size)
+
+    def test_six_frames_get_the_wide_sheet(self):
+        from pixelagent.steps.anim import sheet_plan
+        ch = {"png": self.proj.asset("hero").output("export", "png")}
+        acfg = {"sheet_size": "1536x1024", "sheet_wide": "3072x1024", "min_block": 5}
+        sprite = imaging.load_rgba(ch["png"])
+        bb = sprite.getbbox()
+        w, h = bb[2] - bb[0], bb[3] - bb[1]
+        n = max(2, int(1536 * 0.78 / (4 * w)) + 1)          # so many frames that the normal sheet needs blocks under 5
+        size, block, sh = sheet_plan(ch, n, acfg)
+        self.assertEqual(sh, h)
+        if int(1024 * 0.82 / h) >= 5:
+            self.assertEqual(size, "3072x1024")
+            self.assertGreaterEqual(block, min(5, int(3072 / n * 0.78 / w)))
+        self.assertEqual(sheet_plan(ch, 1, acfg)[0], "1536x1024")
+        self.assertEqual(sheet_plan(ch, n, {"sheet_size": "1536x1024"})[0], "1536x1024")
+
+    def test_touching_figures_are_cut_where_they_are_thinnest(self):
+        # five figures; the second, third and fourth touch through a thin held item (ref08's attack): the cuts go
+        # through the thin links, not through the middle of a figure
+        sheet = Image.new("RGBA", (1000, 300), (222, 222, 226, 255))
+        body = Image.new("RGBA", (100, 200), (60, 70, 120, 255))
+        xs = [40, 230, 420, 600, 860]
+        for x in xs:
+            sheet.alpha_composite(body, (x, 50))
+        link = Image.new("RGBA", (1, 6), (200, 160, 90, 255))
+        for x in range(330, 420):                          # figure 2's item reaches figure 3
+            sheet.alpha_composite(link, (x, 140))
+        for x in range(520, 600):                          # figure 3's reaches figure 4
+            sheet.alpha_composite(link, (x, 150))
+        parts = imaging.split_sheet(sheet, 5)
+        self.assertEqual(len(parts), 5)
+        for i, ((fig, box), x) in enumerate(zip(parts, xs)):
+            self.assertTrue(box[0] <= x and box[2] >= x + 100, (box, x))        # each holds its whole body
+            for other in xs[:i] + xs[i + 1:]:                                   # and no column of another body
+                self.assertTrue(box[2] <= other or box[0] >= other + 100, (box, other))
 
     def test_frame_cleanup_drops_neighbour_pieces_and_specks(self):
         from PIL import Image

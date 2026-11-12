@@ -11,6 +11,8 @@ benchmarks/
   make_synthetic.py      writes synthetic stand-in references for dry runs (refs/synthetic_*.png)
   move_set.py            a character's move set (idle, walk, run, jump, attack, hurt) in parallel, with costs and
                          frame heights (~$0.07 a move)
+  validation_round.py    a rating round: move sets and expressions for several finished characters (`run`, resumable)
+                         and a rating sheet with 1-5 scores and problem tags (`sheet` -> rating.html)
 ```
 
 ## To fill in before M1

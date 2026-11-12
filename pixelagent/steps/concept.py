@@ -139,7 +139,7 @@ def _native_object(ctx, spec, refs):
     ctx.cfg["images"]["draft_size"] = "1024x1024"
     try:
         out = ctx.backend.images.generate("image_final", prompt, n, ctx.path("generated"), refs[:1] or None,
-                                          _native_stub(ctx, spec, block))
+                                          _native_stub(ctx, spec, block), size="1024x1024")
     finally:
         if old is None:
             ctx.cfg["images"].pop("draft_size", None)

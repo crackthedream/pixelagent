@@ -117,15 +117,17 @@ class OpenAIImages(_Base):
         return (txt_in * p.get("text_input", 0) + img_in * p.get("image_input", 0)
                 + usage.output_tokens * p.get("output", 0)) / 1e6
 
-    def generate(self, role, prompt, n, out_dir, refs=None, stub=None, quality=None, mask=None):
+    def generate(self, role, prompt, n, out_dir, refs=None, stub=None, quality=None, mask=None, size=None):
         """Generate n images (refs given -> images.edit with the references; mask: a PNG whose transparent area is
-        the only part the model may change). Returns PNG paths."""
+        the only part the model may change). Returns PNG paths. size ("WxH"): this call's image size; callers that
+        need their own size pass it here instead of changing [images] draft_size, which every run of the project
+        shares: faces drawn while pose sheets were drawn came back at the sheets' size (2026-11-12)."""
         self.check_budget()
         os.makedirs(out_dir, exist_ok=True)
         model = self.model_for(role)
         icfg = self.cfg.get("images", {})
         q = quality or (icfg.get("final_quality") if role == "image_final" else icfg.get("draft_quality"))
-        common = dict(model=model, prompt=prompt, n=n, size=icfg.get("draft_size", "1024x1536"), quality=q,
+        common = dict(model=model, prompt=prompt, n=n, size=size or icfg.get("draft_size", "1024x1536"), quality=q,
                       background=icfg.get("background", "opaque"), output_format="png")
         t = time.perf_counter()
         files = []

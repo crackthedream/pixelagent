@@ -22,6 +22,8 @@ class AppServerTest(unittest.TestCase):
         cls.patch = mock.patch.object(server, "SETTINGS_FILE", os.path.join(cls.tmp, "settings.json"))
         cls.patch.start()
         server.save_settings({**server.default_settings(), "projects_dir": cls.projects, "backend": "dry_run"})
+        server.FEATURES["backgrounds"] = True        # the scene and kit tests below need the experimental libraries
+        server.FEATURES["animations"] = True         # and the animation tests the switched-off animations
         cls.httpd = server.AppServer(("127.0.0.1", 0), server.Handler)
         cls.port = cls.httpd.server_address[1]
         threading.Thread(target=cls.httpd.serve_forever, daemon=True).start()
@@ -31,6 +33,8 @@ class AppServerTest(unittest.TestCase):
         cls.httpd.shutdown()
         cls.httpd.server_close()
         cls.patch.stop()
+        server.FEATURES["backgrounds"] = None
+        server.FEATURES["animations"] = None
         shutil.rmtree(cls.tmp, ignore_errors=True)
 
     # -- helpers
@@ -315,6 +319,17 @@ class AppServerTest(unittest.TestCase):
         status, png = self.get(d["expressions"][0]["face"])
         self.assertEqual((status, png[1:4]), (200, b"PNG"))
         self.assertIn("expression", self.ok(self.get("/api/overview"))["estimates"])
+        # any face the user describes, under their name for it (or one made from the description)
+        self.assertEqual(self.post("/api/expressions", {"project": pid, "id": cid, "custom": {"prompt": " "}})[0], 400)
+        self.assertEqual(self.post("/api/expressions", {"project": pid, "id": cid, "names": []})[0], 400)
+        r = self.ok(self.post("/api/expressions", {"project": pid, "id": cid, "custom": {
+            "prompt": "a smug half-smile with one brow raised", "name": "Smug!"}}))
+        self.assertEqual(r["names"], ["smug"])
+        d = self.wait_idle(pid, cid)
+        self.assertEqual([e["name"] for e in d["expressions"]], ["happy", "blink", "smug"], d.get("error"))
+        smug = d["expressions"][2]
+        self.assertTrue(smug["custom"] and smug["passed"])
+        self.assertIn("smug half-smile", smug["note"])
         self.assertIn("overall", self.asset(pid, cid).get("quality") or {})      # the critic's verdict stays on the page
 
     def test_game_pack_has_every_animation_and_face(self):
@@ -379,6 +394,34 @@ class AppServerTest(unittest.TestCase):
         self.assertIn(f"item_sheet/godot/{name}.tres", names)
         empty = self.new_project("No items")
         self.assertEqual(self.post("/api/itemsheet", {"project": empty})[0], 400)
+
+    def test_scenes_and_kits_are_off_unless_switched_on(self):
+        pid = self.new_project("Focus")
+        with mock.patch.dict(server.FEATURES, {"backgrounds": False}):
+            self.assertFalse(self.ok(self.get("/api/overview"))["features"]["backgrounds"])
+            status, body = self.post("/api/scenes", {"project": pid, "prompt": "a forest at dusk"})
+            self.assertEqual(status, 400)
+            self.assertIn("switched off", body["error"])
+            self.assertEqual(self.post("/api/kits", {"project": pid, "prompt": "forest ground"})[0], 400)
+        self.assertTrue(self.ok(self.get("/api/overview"))["features"]["backgrounds"])
+
+    def test_animations_are_off_unless_switched_on(self):
+        pid = self.new_project("Still")
+        cid = self.ok(self.post("/api/characters", {"project": pid, "prompt": "a small knight"}))["id"]
+        self.assertEqual(self.drive(pid, cid)["status"], "complete")
+        with mock.patch.dict(server.FEATURES, {"animations": False}):
+            self.assertFalse(self.ok(self.get("/api/overview"))["features"]["animations"])
+            status, body = self.post("/api/animations", {"project": pid, "character": cid, "prompt": "walk"})
+            self.assertEqual(status, 400)
+            self.assertIn("switched off", body["error"])
+            self.assertEqual(self.post("/api/movesets", {"project": pid, "character": cid})[0], 400)
+            # expressions and the game pack do not depend on animations
+            self.ok(self.post("/api/expressions", {"project": pid, "id": cid, "names": ["blink"]}))
+            self.assertEqual([e["name"] for e in self.wait_idle(pid, cid)["expressions"]], ["blink"])
+            self.assertEqual(self.ok(self.post("/api/gamepack", {"project": pid, "id": cid}))["animations"], ["stand", "face_blink"])
+        self.assertTrue(self.ok(self.get("/api/overview"))["features"]["animations"])
+        with mock.patch.dict(server.FEATURES, {"animations": None}):      # the shipped default: off
+            self.assertFalse(server.feature_on("animations"))
 
     def test_scenes_stop_for_approval_with_a_parallax_preview(self):
         pid = self.new_project("Places")

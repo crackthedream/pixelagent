@@ -73,7 +73,7 @@ class StubLLM(_Base):
 
 
 class StubImages(_Base):
-    def generate(self, role, prompt, n, out_dir, refs=None, stub=None, quality=None, mask=None):
+    def generate(self, role, prompt, n, out_dir, refs=None, stub=None, quality=None, mask=None, size=None):
         os.makedirs(out_dir, exist_ok=True)
         paths = stub(n, out_dir) if stub else []
         if not paths and refs:

@@ -115,7 +115,7 @@ background. The result must look like the same illustration with only the reques
 
 LOCATE_FACE = """This is a pixel-art game character shown enlarged. Give the tight box around its FACE FEATURES: both
 eyes, the brows and the mouth (not the whole head, not the hair), as fractions 0-1 of the image width and height.
-found=false when the face cannot be seen."""
+found=false when the face cannot be seen. Also name the colour of the irises in one or two plain words."""
 
 # scene backdrops (pixelagent/steps/scene.py)
 SCENE_PLAN = """Plan a parallax backdrop for a 2D side-scrolling pixel-art action game (the look of modern hand-made
@@ -167,9 +167,31 @@ Everything else stays fully transparent: no sky, no background, no shadows on th
 # an expression of a finished pixel-art character: a masked edit of its pixel-art concept, the face only
 EXPRESSION = """Edit this pixel-art character sprite: change ONLY the facial expression, inside the transparent area of
 the mask, to {expression}. It is hand-pixelled art shown enlarged: keep exactly the same block size and grid, crisp
-square blocks (no smoothing, no blur, no new detail finer than one block), the same palette, the same face shape,
-skin and hair. Draw the eyes, brows and mouth as a few designed pixels in the same style as the original face --
-vivid and simple, like a pixel-art game character's expression. Everything else stays exactly as it is."""
+square blocks (no smoothing, no blur, no new detail finer than one block), the same palette and the same face shape.
+Do NOT repaint the skin or the hair: every skin pixel that the expression does not need keeps its exact colour, and
+the fringe and side locks stay pixel for pixel. This is the SAME character: open eyes keep their own iris colour,
+lashes and highlights and the way they are drawn (change their shape and openness only as the expression needs);
+brows and mouth are a few designed pixels in the original face's style -- vivid and simple, like a pixel-art game
+character's expression. Everything else stays exactly as it is."""
+
+EXPRESSION_EYES = """
+Whenever the eyes are open, the irises keep exactly the colours they have in the original image (they look
+{colour}): the same hue, not brighter and not more saturated."""
+
+EXPRESSION_RETRY = """
+IMPORTANT: an earlier attempt was rejected: {issue}. Fix exactly that."""
+
+# the check of a drawn expression (expressions.judge): the neutral face on the left, the new one on the right
+FACE_CHECK = """Two pixel-art faces of the same game character: LEFT the original, RIGHT a new expression that was
+asked to be: {expression}. Only the eyes, brows and mouth were meant to change. Check the RIGHT face against the
+LEFT one:
+- reads: it shows the requested expression (judge the feeling, not the exact wording of the request);
+- same_skin: the skin has the same base tone (a blush, tears or a shadow that the expression needs is fine; a
+  lighter, darker or differently tinted skin is not);
+- same_hair: the fringe and side locks have the same shape and colours (small pixel noise is fine);
+- eyes_in_style: open eyes keep the original IRIS COLOUR and are drawn in the same style -- an iris that changed
+  colour (for example green to red or brown) or blank white eyes fail; true when the expression closes the eyes.
+Fail only what is clearly wrong."""
 
 REFINE_CONCEPT = """Refine this concept for pixel-art conversion without changing the design: keep identity, pose,
 colours and proportions; simplify noisy detail into large clear shapes, make the silhouette crisp, keep the
@@ -292,6 +314,12 @@ show the sheet enlarged so that every sprite pixel is a crisp, perfectly square 
 image pixels, on ONE regular grid shared by all frames (nearest-neighbour: no smoothing, no blur). Do NOT draw grid
 lines or pixel borders. Clean clusters of flat tones, no gradients, no dithering, no dark outline around the figure;
 the face a few designed pixels, the same size in every frame."""
+
+# added when a pose sheet is drawn again because its pixels came out too coarse (anim.too_coarse)
+POSE_SHEET_RETRY = """
+IMPORTANT: an earlier attempt drew its pixels too large, so every figure had too few pixels and lost detail. Each
+figure must have exactly as many pixels as its copy in the layout: one pixel of the layout stays ONE block of
+{block}x{block} image pixels, never bigger."""
 
 ANIM_FRAME = """You are animating the game character '{name}' with the pixelliner tools: frame {k1} of {n} of the
 '{anim}' animation. Pose for this frame: {pose}

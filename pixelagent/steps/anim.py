@@ -53,6 +53,21 @@ def _sheet_block(ch, n, size):
     return max(3, min(int(H * 0.82 / sh), int(W / n * 0.78 / sw))), sh
 
 
+def sheet_plan(ch, n, acfg):
+    """The pose sheet's size and block: the normal sheet, or the wide one when the normal one would need blocks of
+    under [animation] min_block image pixels. Asked for 3-px blocks the image model drew 4-px ones on a third of the
+    sheets, so those frames had 25% too few pixels; on the wide sheet the same six frames get 6-px blocks at the
+    same price (validation round, 2026-11-12)."""
+    size = acfg.get("sheet_size", "1536x1024")
+    block, sh = _sheet_block(ch, n, size)
+    wide = acfg.get("sheet_wide")
+    if wide and block < int(acfg.get("min_block", 5)):
+        b2, _ = _sheet_block(ch, n, wide)
+        if b2 > block:
+            size, block = wide, b2
+    return size, block, sh
+
+
 def layout_sheet(sprite, n, block, size, bob=0):
     """The pose sheet's layout for the native finish: the finished sprite placed n times at its final pixel scale (one
     sprite pixel = block x block image pixels), centred in n equal cells on one ground line. The image model redraws
@@ -123,7 +138,25 @@ def clean_frame(frame):
     return out.crop(out.getbbox()) if out.getbbox() else out
 
 
-def read_pixel_frames(sheet, boxes, block, target_h, tol=0.03):
+COARSE, SMALL = 1.06, 0.94      # drawn block / asked block, and silhouette scale, beyond which frames are enlarged
+RETRY_COARSE, RETRY_SMALL = 1.15, 0.90   # ... and beyond which the sheet is first drawn again
+
+
+def silhouette_scale(frames, sprite):
+    """The figures' size against the sprite's, from their areas: the median of sqrt(frame pixels / sprite pixels).
+    A pose changes the height (a lean, a crouch) far more than the area."""
+    def area(im):
+        return float((np.asarray(im.convert("RGBA"))[..., 3] > 0).sum())
+    a0 = max(1.0, area(sprite))
+    return float(np.median([np.sqrt(area(f) / a0) for f in frames])) if frames else 1.0
+
+
+def too_coarse(fit):
+    """Is a sheet's reading (read_pixel_frames' info) bad enough to draw the sheet again?"""
+    return bool(fit) and fit.get("grid", 1.0) > RETRY_COARSE and fit.get("area", 1.0) < RETRY_SMALL
+
+
+def read_pixel_frames(sheet, boxes, block, target_h, tol=0.03, sprite=None):
     """Read each figure of a pixel-art pose sheet back at 1x on ONE block size measured on the whole sheet. The image
     model draws walking figures a little bigger or smaller than asked (~6% taller than the standing sprite seen);
     the scale comes from the TALLER half of the frames -- the upright ones: a jump's or an attack's crouching frames
@@ -132,7 +165,12 @@ def read_pixel_frames(sheet, boxes, block, target_h, tol=0.03):
     the runner bigger than the character, 2026-11-11). When it is more than tol too big, the sheet is read again on a
     proportionally larger
     (smaller) regular grid -- a resize done on the drawn high-resolution sheet, where each 1x pixel takes its patch's
-    dominant colour, instead of on the finished 1x frames. Returns (frames, image px per sprite px, info)."""
+    dominant colour, instead of on the finished 1x frames.
+    sprite (the finished sprite, cropped): also catches pixels drawn COARSER than asked. The figure then has the
+    layout's size on the sheet but too few pixels (blocks of 4 px for 3 asked: frames at 0.75x). Told apart from a
+    pose by the block grid itself (drawn block / asked block > COARSE) together with the silhouette's area (< SMALL
+    of the sprite's); the sheet is then read on the asked block size.
+    Returns (frames, image px per sprite px, info)."""
     from ..pixelart import find_grid, sprite_from_pixel_art
     g = find_grid(sheet, expected=block)
 
@@ -151,9 +189,16 @@ def read_pixel_frames(sheet, boxes, block, target_h, tol=0.03):
     drawn = upright[len(upright) // 2]
     ratio = drawn / float(max(1, target_h))
     info = {"drawn_height": drawn, "target_height": int(target_h), "resized": False}
+    coarse = (g["px"] + g["py"]) / 2 / float(block)
+    if sprite is not None:
+        info.update(grid=round(coarse, 3), area=round(silhouette_scale(frames, sprite), 3))
     if 1 + tol < ratio <= 1.4:
         frames = read((g["px"] * ratio, g["py"] * ratio), False)
         info.update(resized=True, ratio=round(ratio, 3))
+    elif sprite is not None and coarse > COARSE and info["area"] < SMALL:
+        ratio = 1.0 / coarse
+        frames = read((g["px"] * ratio, g["py"] * ratio), False)
+        info.update(resized=True, enlarged=True, ratio=round(ratio, 3))
     return frames, (g["px"] + g["py"]) / 2 * (ratio if info["resized"] else 1.0), info
 
 
@@ -204,10 +249,12 @@ def poses(ctx):
     frames_txt = "\n".join(f"{i + 1}) {f.pose}" for i, f in enumerate(spec.frames))
     prompt = prompts.POSE_SHEET.format(n=n, view=ch["spec"].view.replace("_", "-"), summary=spec.summary,
                                        frames=frames_txt)
-    size = ctx.cfg.get("animation", {}).get("sheet_size", "1536x1024")
+    acfg = ctx.cfg.get("animation", {})
+    size = acfg.get("sheet_size", "1536x1024")
     block = None
     if native_mode(ctx):
-        block, sprite_h = _sheet_block(ch, n, size)
+        size, block, sprite_h = sheet_plan(ch, n, acfg)
+        ctx.info["sheet_size"] = size
         prompt += prompts.POSE_SHEET_PIXEL.format(block=block, height=sprite_h, n=n)
         ctx.info["block"] = block
     elif reduce_mode(ctx):
@@ -250,15 +297,38 @@ def poses(ctx):
         sheet.convert("RGB").save(p)
         return [p]
 
-    old = ctx.cfg["images"].get("draft_size")
-    ctx.cfg["images"]["draft_size"] = size
-    try:
-        out = ctx.backend.images.generate("image_final", prompt, 1, ctx.path("generated"), refs,
-                                          stub, quality=ctx.cfg.get("animation", {}).get("sheet_quality", "medium"))
-    finally:
-        ctx.cfg["images"]["draft_size"] = old
-    sheet = imaging.load_rgba(out[0])
-    parts = imaging.split_sheet(sheet, n)
+    def generate(text, folder):
+        return ctx.backend.images.generate("image_final", text, 1, ctx.path(folder), refs, stub,
+                                           quality=acfg.get("sheet_quality", "medium"), size=size)[0]
+
+    def measure(path):
+        """The sheet, its figures, and how they read back against the sprite (native finish only)."""
+        sh = imaging.load_rgba(path)
+        ps = imaging.split_sheet(sh, n)
+        fit = None
+        if block:
+            sp = sprite.crop(sprite.getbbox())
+            fit = read_pixel_frames(sh, [b for _, b in ps], block, sp.height, sprite=sp)[2]
+        return sh, ps, fit
+
+    sheet, parts, fit = measure(generate(prompt, "generated"))
+    if fit:
+        tries = [fit]
+        for k in range(int(acfg.get("sheet_retries", 1))):
+            if not too_coarse(fit):
+                break
+            ctx.log(f"[anim_poses] the sheet's pixels came out coarse (x{fit['grid']}, figures at {fit['area']} of "
+                    "the sprite): drawing it once more")
+            try:
+                again = measure(generate(prompt + prompts.POSE_SHEET_RETRY.format(block=block), f"generated_retry{k + 1}"))
+            except (ValueError, OSError) as e:      # a sheet that cannot be cut into its figures: keep the first
+                ctx.log(f"[anim_poses] the second sheet could not be used: {e}")
+                break
+            tries.append(again[2])
+            if again[2]["area"] > fit["area"]:
+                sheet, parts, fit = again
+        ctx.info["sheet_check"] = {"attempts": len(tries), "readings": [{k: t.get(k) for k in ("grid", "area")} for t in tries],
+                                   "kept": {k: fit.get(k) for k in ("grid", "area")}, "coarse": too_coarse(fit)}
     for i, (fig, box) in enumerate(parts):
         ctx.save_image(f"figure{i}", f"figure_{i:02d}.png", fig)
     ctx.save_image("sheet", "pose_sheet.png", sheet)
@@ -288,7 +358,7 @@ def traces(ctx):
         # standing sprite's height (read_pixel_frames)
         sheet = imaging.load_rgba(ctx.input("anim_poses", "sheet"))
         block = ctx.asset.state.steps["anim_poses"].info.get("block") or 8
-        small, s, fit = read_pixel_frames(sheet, boxes, block, sb[3] - sb[1])
+        small, s, fit = read_pixel_frames(sheet, boxes, block, sb[3] - sb[1], sprite=sprite.crop(sprite.getbbox()))
         ctx.info["frame_size"] = fit
     else:
         heights = sorted(b[3] - b[1] for b in boxes)

@@ -131,6 +131,23 @@ def rd(path):
         return f.read()
 
 
+class ImageSizeTests(unittest.TestCase):
+    def test_a_calls_own_size_wins_over_the_shared_setting(self):
+        from pixelagent.openai_backend import OpenAIImages
+        tmp = tempfile.mkdtemp(prefix="pxa_size_")
+        try:
+            proj = Project(tmp, {"backend": {"mode": "dry_run"}})
+            proj.new_asset("a", {"prompt": "x"})
+            client = FakeClient()
+            im = OpenAIImages(proj, "a", client=client)
+            im.generate("image_final", "p", 1, os.path.join(tmp, "g1"), size="3072x1024")
+            im.generate("image_final", "p", 1, os.path.join(tmp, "g2"))
+            sizes = [kw["size"] for kind, kw in client.log if kind == "generate"]
+            self.assertEqual(sizes, ["3072x1024", proj.config["images"]["draft_size"]])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
 class OpenAIBackendTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp(prefix="pxa_oa_")

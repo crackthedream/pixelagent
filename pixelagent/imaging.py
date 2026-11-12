@@ -191,7 +191,10 @@ def from_bytes(w, h, data):
 def split_sheet(im, n, alpha_threshold=128, min_gap=3):
     """Cut a horizontal pose sheet (figures in one row on a plain background) into n figures.
     Uses empty columns between figures; merges the closest neighbours if there are too many pieces (detached
-    props), splits the widest if there are too few; falls back to n equal columns.
+    props). Too few pieces mean figures that touch (a held item reaching the next figure): such a piece is cut at
+    its thinnest columns, one cut near each place where a figure of the usual width would end. Cutting it in
+    halves cut a figure in two when three figures touched (ref08's attack, 2026-11-12). Falls back to n equal
+    columns.
     Returns [(figure RGBA image cropped to content, (x0, y0, x1, y1) in sheet coordinates)], left to right."""
     rgba = remove_background(im.convert("RGBA"))
     a = np.asarray(rgba)[..., 3] >= alpha_threshold
@@ -211,11 +214,23 @@ def split_sheet(im, n, alpha_threshold=128, min_gap=3):
         i = int(np.argmin(gaps))
         spans[i] = [spans[i][0], spans[i + 1][1]]
         del spans[i + 1]
-    while 0 < len(spans) < n:  # split the widest span in half
-        i = max(range(len(spans)), key=lambda k: spans[k][1] - spans[k][0])
-        s0, s1 = spans[i]
-        mid = (s0 + s1) // 2
-        spans[i:i + 1] = [[s0, mid], [mid, s1]]
+    if 0 < len(spans) < n:  # figures that touch: share the missing cuts among the widest spans
+        occ = a.sum(axis=0)
+        holds = [1] * len(spans)
+        for _ in range(n - len(spans)):
+            i = max(range(len(spans)), key=lambda k: (spans[k][1] - spans[k][0]) / holds[k])
+            holds[i] += 1
+        cut = []
+        for (s0, s1), k in zip(spans, holds):
+            edges = [s0]
+            for j in range(1, k):
+                at, reach = s0 + (s1 - s0) * j / k, (s1 - s0) / k * 0.3
+                lo, hi = max(edges[-1] + 4, int(at - reach)), min(s1 - 4, int(at + reach))
+                xs = np.arange(lo, max(lo + 1, hi))
+                # the thinnest column near the expected place (ties: the nearest to it)
+                edges.append(int(xs[np.lexsort((np.abs(xs - at), occ[xs]))[0]]))
+            cut += [[e0, e1] for e0, e1 in zip(edges, edges[1:] + [s1])]
+        spans = cut
     if not spans:
         spans = [[k * W // n, (k + 1) * W // n] for k in range(n)]
     out = []

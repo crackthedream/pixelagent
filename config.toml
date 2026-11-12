@@ -50,6 +50,13 @@ input_fidelity = ""          # "high" for edit models that support it (gpt-image
 min_iou = 0.85               # map silhouette must overlap the concept silhouette this well
 max_unknown = 0.15           # max share of concept pixels whose map colour matches no key
 
+[app]
+# The agent's focus is characters and their expressions (owner, 2026-11-12). The parts below are off: hidden in the
+# app, new ones refused, their code and existing items untouched. true switches one back on.
+backgrounds = false          # Scenes and Kits (experimental)
+animations = false           # Animations and Move set: moves made from one static sprite rated 3.57 of 5 against
+                             # 4.32 for expressions, and fail on a front-facing or seated sprite (docs/FACE_ROOT_CAUSE.md)
+
 [scene]
 height = 540                 # a backdrop layer's height in pixels at the characters' 1x scale (one screen)
 quality = "medium"           # image quality for scene layers and seam repaints
@@ -119,8 +126,16 @@ face_rules = "v3"             # "v3": faces built with the engine's face kit (Al
                               # mouths); "v1": the model draws the face pixels (compared in benchmarks/face_lab.py)
 effort = "medium"
 
+[expressions]
+retries = 1                  # a face that fails its check is drawn once more with the findings (the better one kept)
+judge = true                 # vision check of each face against the neutral one (~$0.003)
+min_skin_kept = 0.5          # the share of the face's main skin colour that must stay as it was
+
 [animation]
 sheet_size = "1536x1024"     # pose sheet: all frames in one row
+sheet_wide = "3072x1024"     # used instead when the frames would need pixels of under min_block image pixels each
+min_block = 5                # the image model draws 3-px pixels as 4-px ones: a third of the frames came out 25% small
+sheet_retries = 1            # a sheet whose pixels still come out too coarse is drawn once more (the better one kept)
 sheet_quality = "medium"
 turns_per_frame = 14         # artist rounds per frame (each frame starts from the previous one)
 max_usd = 4.0                # cap for the drawing of one animation (upper bound)

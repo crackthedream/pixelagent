@@ -446,7 +446,9 @@ def asset_detail(settings, pid, proj, aid):
                 ex = json.load(f)
             d["expressions"] = [{"name": n, "url": file_url(pid, a, "expressions/" + e["png"]),
                                  "x4": file_url(pid, a, "expressions/" + e["png_x4"]),
-                                 "face": file_url(pid, a, "expressions/" + e["face"])}
+                                 "face": file_url(pid, a, "expressions/" + e["face"]),
+                                 "note": e.get("note", ""), "custom": bool(e.get("custom")),
+                                 "passed": e.get("passed", True), "issue": (e.get("check") or {}).get("issue", "")}
                                 for n, e in ex.get("expressions", {}).items()]
             d["face_box"] = ex.get("face_box")
     return d
@@ -576,7 +578,19 @@ def make_expressions(settings, body):
     """Expressions for a finished character (pixel-art look): one masked face edit each, in the background."""
     from .. import expressions
     pid, aid = body["project"], body["id"]
-    names = body.get("names") or list(expressions.EXPRESSIONS)
+    # the user's own expression: {"prompt": what the face does, "name": optional}; presets by name
+    own = body.get("custom") or None
+    custom = {}
+    if own:
+        text = str(own.get("prompt") or "").strip()
+        if not text:
+            raise ValueError("describe the expression, for example: a smug half-smile with one brow raised")
+        custom[expressions.safe_name(own.get("name") or " ".join(text.split()[:3]))] = text
+    names = body.get("names")
+    if names is None:
+        names = [] if custom else list(expressions.EXPRESSIONS)
+    if not names and not custom:
+        raise ValueError("pick a face or describe one")
     unknown = [n for n in names if n not in expressions.EXPRESSIONS]
     if unknown:
         raise ValueError(f"unknown expression: {', '.join(map(str, unknown))}")
@@ -588,12 +602,13 @@ def make_expressions(settings, body):
         raise ValueError("expressions are made for a finished character")
     if proj.config.get("finish", {}).get("mode") != "native":
         raise ValueError("expressions need the Soft look (pixel-art characters)")
-    JOBS.start((pid, aid), lambda log: expressions.make(proj, aid, names, log=log))
-    return {"ok": True, "names": names}
+    JOBS.start((pid, aid), lambda log: expressions.make(proj, aid, names, log=log, custom=custom))
+    return {"ok": True, "names": names + list(custom)}
 
 
 def create_move_set(settings, body):
     """Several animations of one character at once (each still stops for its poses to be approved)."""
+    need_animations()
     pid, char = body["project"], body["character"]
     moves = body.get("moves") or list(MOVES)
     unknown = [m for m in moves if m not in MOVES]
@@ -614,8 +629,36 @@ def create_move_set(settings, body):
     return {"ids": ids}
 
 
+# Experimental parts of the app, off unless config.toml [app] turns them on (None: read the config; tests set it).
+FEATURES = {"backgrounds": None, "animations": None}
+
+
+def feature_on(name):
+    """A part of the app outside the agent's focus (characters and their expressions), kept behind config.toml
+    [app] <name>: "backgrounds" (Scenes and Kits) or "animations" (Animations and Move set)."""
+    if FEATURES[name] is not None:
+        return bool(FEATURES[name])
+    from ..config import load_config
+    return bool(load_config().get("app", {}).get(name, False))
+
+
+def backgrounds_on():
+    return feature_on("backgrounds")
+
+
+def need_backgrounds():
+    if not backgrounds_on():
+        raise ValueError("scenes and kits are switched off (config.toml [app] backgrounds = true turns them on)")
+
+
+def need_animations():
+    if not feature_on("animations"):
+        raise ValueError("animations are switched off (config.toml [app] animations = true turns them on)")
+
+
 def create_kit(settings, body):
     """A walkable kit (tiles and decorations), optionally matched to a finished scene of the project."""
+    need_backgrounds()
     pid = body["project"]
     spend_check(settings, pid)
     proj = Project(project_path(settings, pid), overrides(settings))
@@ -634,6 +677,7 @@ def create_kit(settings, body):
 
 def create_scene(settings, body):
     """A scenery backdrop (parallax layers) from the user's prompt."""
+    need_backgrounds()
     pid = body["project"]
     spend_check(settings, pid)
     proj = Project(project_path(settings, pid), overrides(settings))
@@ -648,6 +692,7 @@ def create_scene(settings, body):
 
 
 def create_animation(settings, body):
+    need_animations()
     pid = body["project"]
     spend_check(settings, pid)
     proj = Project(project_path(settings, pid), overrides(settings))
@@ -1014,6 +1059,7 @@ class Handler(BaseHTTPRequestHandler):
                     "look": s.get("look", "soft"), "grade": s.get("grade", "medium"),
                     "prop_grade": s.get("prop_grade", "soft")},
                     "month_spent": round(spent, 2), "estimates": estimates(s),
+                    "features": {"backgrounds": backgrounds_on(), "animations": feature_on("animations")},
                     "trash_count": len(trash(s).entries())})
             if u.path == "/api/assets":
                 proj = Project(project_path(s, q["project"]))

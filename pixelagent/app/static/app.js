@@ -98,12 +98,21 @@ function spendBanner() {
 
 // ------------------------------------------------------------------ sidebar
 
+function animationsOn() {
+  const f = state.overview && state.overview.features;
+  return !!(f && f.animations);
+}
+
 function renderSidebar() {
   const o = state.overview;
   $("#project-list").innerHTML = o.projects.map((p) => `
     <div class="side-row"><button class="side-item project-item ${p === o.current ? "current active" : ""}" data-project="${esc(p)}">
       ${icon("folder")}<span>${esc(p)}</span></button>
       <button class="side-more" data-project-more="${esc(p)}" aria-label="Actions for ${esc(p)}">${icon("more")}</button></div>`).join("");
+  // Scenes and Kits are experimental (config.toml [app] backgrounds): hidden unless switched on
+  for (const el of document.querySelectorAll(".side-item[data-view=scenes], .side-item[data-view=kits]")) el.hidden = !(o.features && o.features.backgrounds);
+  // Animations too (config.toml [app] animations)
+  for (const el of document.querySelectorAll(".side-item[data-view=animations]")) el.hidden = !animationsOn();
   const dc = $("#count-deleted");
   dc.hidden = !o.trash_count;
   dc.textContent = o.trash_count || "";
@@ -426,23 +435,24 @@ function inspector(d) {
   if (d.exports) {
     html += `<div class="card"><h2>Exports</h2><div class="list">${d.exports.filter((e) => e.url).map((e) => `
       <div class="row"><span class="grow">${esc(e.label)}</span><a href="${esc(e.url)}" download>Save</a></div>`).join("")}
-      ${d.kind === "character" ? `<div class="row"><span class="grow">Game pack (ZIP)<div class="muted small">Atlas with every animation and face, for Godot, Unity, Aseprite JSON</div></span><button class="btn" id="btn-pack">Save</button></div>` : ""}</div></div>`;
+      ${d.kind === "character" ? `<div class="row"><span class="grow">Game pack (ZIP)<div class="muted small">${animationsOn() ? "Atlas with every animation and face" : "Atlas with the sprite and every face"}, for Godot, Unity, Aseprite JSON</div></span><button class="btn" id="btn-pack">Save</button></div>` : ""}</div></div>`;
   }
-  if (d.kind === "character" && d.status === "complete") {
-    const anims = state.items.filter((i) => i.kind === "animation" && i.character === d.id);
+  const anims = state.items.filter((i) => i.kind === "animation" && i.character === d.id);
+  // switched off: no new ones; animations made earlier stay listed
+  if (d.kind === "character" && d.status === "complete" && (animationsOn() || anims.length)) {
     html += `<div class="card"><h2>Animations</h2>
       ${anims.length ? `<div class="list">${anims.map((a) => `
         <a class="row" href="#/item/${encodeURIComponent(a.id)}"><span class="stage thumb">${stageImg(a.thumb, a.name)}</span>
           <span class="grow">${esc(a.name)}</span></a>`).join("")}</div>` : `<p class="muted" style="margin:0 0 10px">None yet.</p>`}
-      <div class="row-actions" style="margin-top:8px"><button class="btn" id="btn-new-anim">${icon("plus")}New animation</button>
-        <button class="btn" id="btn-move-set">${icon("plus")}Move set</button></div></div>`;
+      ${animationsOn() ? `<div class="row-actions" style="margin-top:8px"><button class="btn" id="btn-new-anim">${icon("plus")}New animation</button>
+        <button class="btn" id="btn-move-set">${icon("plus")}Move set</button></div>` : ""}</div>`;
   }
   if (d.kind === "character" && d.status === "complete") {
     const ex = d.expressions || [];
     html += `<div class="card"><h2>Expressions</h2>
-      ${ex.length ? `<div class="expr-grid">${ex.map((e) => `<figure class="expr"><a class="stage" href="${esc(e.x4)}" target="_blank" rel="noopener" title="Open the whole sprite at 4×">${stageImg(e.face, e.name)}</a>
-        <figcaption>${esc(e.name)} <a href="${esc(e.url)}" download>PNG</a> <a href="${esc(e.face)}" download>Face</a></figcaption></figure>`).join("")}</div>`
-        : `<p class="muted" style="margin:0 0 10px">The same sprite with another face: happy, sad, angry and more. Only the face changes, so a game can swap the face alone.</p>`}
+      ${ex.length ? `<div class="expr-grid">${ex.map((e) => `<figure class="expr"><a class="stage" href="${esc(e.x4)}" target="_blank" rel="noopener" title="${esc(e.note || "Open the whole sprite at 4×")}">${stageImg(e.face, e.name)}</a>
+        <figcaption>${esc(e.name)} <a href="${esc(e.url)}" download>PNG</a> <a href="${esc(e.face)}" download>Face</a>${e.passed === false ? `<span class="expr-warn" title="${esc(e.issue || "This face did not pass its check against the original.")}">Check this face</span>` : ""}</figcaption></figure>`).join("")}</div>`
+        : `<p class="muted" style="margin:0 0 10px">The same sprite with another face: happy, sad, angry, or any face you describe. Only the face changes, so a game can swap the face alone.</p>`}
       <button class="btn" id="btn-expr" style="margin-top:8px">${icon("plus")}${ex.length ? "Make more" : "Make expressions"}</button></div>`;
   }
   if (d.log.length) {
@@ -921,22 +931,29 @@ function sheetExpressions(d) {
   const have = new Set((d.expressions || []).map((e) => e.name));
   openSheet(`<h2>Expressions</h2><p class="sub">New faces for ${esc(d.name)}. Only the face is redrawn; the rest of the sprite stays pixel for pixel. Making one again replaces it.</p>
     <div class="field"><span class="label">Faces</span><div class="chips" id="ex-names">${names.map(([v, l]) =>
-      `<button class="chip" data-v="${v}" aria-pressed="${!have.has(v)}">${l}</button>`).join("")}</div></div>
+      `<button class="chip" data-v="${v}" aria-pressed="${!have.size && !have.has(v)}">${l}</button>`).join("")}</div></div>
+    <div class="field"><label for="ex-own">Your own</label>
+      <textarea class="textarea" id="ex-own" rows="2" placeholder="Describe a face, for example: a smug half-smile with one brow raised"></textarea></div>
+    <div class="field"><label for="ex-own-name">Its name</label>
+      <input class="input" id="ex-own-name" maxlength="24" placeholder="smug"></div>
     <div class="actions"><span class="estimate" id="ex-est"></span><button class="btn" data-close>Cancel</button><button class="btn primary" id="ex-go">Make expressions</button></div>`, (s) => {
     const picked = () => [...s.querySelectorAll("#ex-names .chip[aria-pressed=true]")];
+    const own = () => $("#ex-own").value.trim();
     const est = () => {
-      const p = picked();
-      $("#ex-est").textContent = p.length ? estimateText(p.length * (state.overview.estimates.expression || 0.06)) : "Pick at least one face";
-      $("#ex-go").disabled = !p.length;
+      const n = picked().length + (own() ? 1 : 0);
+      $("#ex-est").textContent = n ? estimateText(n * (state.overview.estimates.expression || 0.06)) : "Pick a face or describe one";
+      $("#ex-go").disabled = !n;
     };
+    $("#ex-own").oninput = est;
     s.querySelectorAll("#ex-names .chip").forEach((b) => b.onclick = () => {
       b.setAttribute("aria-pressed", b.getAttribute("aria-pressed") === "true" ? "false" : "true"); est();
     });
     est();
     s.querySelector("[data-close]").onclick = closeSheet;
     $("#ex-go").onclick = async () => {
-      const r = await act(() => api("/api/expressions", { project: project(), id: d.id, names: picked().map((b) => b.dataset.v) }),
-        "Drawing the expressions");
+      const body = { project: project(), id: d.id, names: picked().map((b) => b.dataset.v) };
+      if (own()) body.custom = { prompt: own(), name: $("#ex-own-name").value.trim() };
+      const r = await act(() => api("/api/expressions", body), "Drawing the expressions");
       if (r) closeSheet();
     };
   });

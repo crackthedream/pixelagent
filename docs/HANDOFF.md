@@ -2,8 +2,8 @@
 
 A handoff document for an AI developer (GPT) continuing this project. It describes what exists, how it works,
 what has been measured, which decisions the owner has made, and what is left to build, in priority order.
-Status as of 2026-11-11 (the native pixel-art finish, palette grade, move sets, expressions and game packs: section
-13; earlier status from 2026-11-09 below where not superseded; see `git log` of `crackthedream/pixelagent`
+Status as of 2026-11-12 (scope narrowed to characters and their expressions; animations, scenes and kits are
+switched off; the native pixel-art finish, palette grade, move sets, expressions and game packs: section 13; earlier status from 2026-11-09 below where not superseded; see `git log` of `crackthedream/pixelagent`
 and `7801b3e` of `crackthedream/pixelliner-mcp`, both private GitHub repositories).
 
 ---
@@ -638,9 +638,9 @@ license, dependency lock and pinned engine revision in the build, CI, clean-mach
 5. **Native-finish limits:** the proportion check misreads pixel art and is information only. The image model
    picks its own pixel count, so sprite heights vary by about 10%. Material labels are coarse (no eye material on
    most characters).
-6. **Character-tuned pipeline.** `CharacterSpec.asset_type` accepts `prop`, `tile` and `scene`, but the steps
-   (face pass, material labels, pose logic) assume a character. Objects and scenes are not yet supported in
-   practice.
+6. **Outside the focus.** Objects work (the Objects library) and are frozen. Scenes and kits work but are
+   experimental and off (`config.toml [app] backgrounds`); their engine files were never opened in the engines.
+   A seated reference gives a seated sprite, and its walk, run and jump then stand up without the seat.
 7. **Image-model prices are unverified.** Costs are estimates; `costs.jsonl` keeps raw token counts for
    recomputation.
 8. **Windows-only parts:** `winreg` for the key and the Edge lookup, and `os.startfile`.
@@ -681,9 +681,43 @@ an animation-listing bug.
   the sword was drawn 82 px for 48 and fitted, losing some blade shading. Objects use their own, lighter palette
   grade (`[finish] prop_grade = "soft"`, the owner's pick: medium turned gold and potion reds dusty).
 
+### Scope (owner, 2026-11-12)
+PixelAgent is an asset generator, not a game engine. The core is a character from a reference image or a prompt
+and expressions from a prompt, exported as plain files, held to a high standard. Objects are kept and frozen.
+Scenes and kits are switched off (`[app] backgrounds`); the level composer and the LDtk project file are dropped.
+Nothing that places assets in a scene or moves them around belongs here.
+
+**Animations are switched off too** (`[app] animations`, the owner after rating the second round, 2026-11-12):
+moves made from one static sprite rated 3.57 against 4.32 for faces, and a front-facing (ref01, 2.2) or seated
+(ref10) sprite cannot give a side-view walk without redesigning the figure. The Animations library, New animation
+and Move set are hidden and refused; the code, the `animate` command and animations made earlier stay. Simple
+motion comes from pairs of faces (neutral and blink, neutral and an open mouth).
+
+**Character generation is done when**, on a fixed set of the ten references plus five text prompts (a character
+and three expressions each): the owner's average rating is at least 4 with nothing below 3, a second run of the set
+rates alike, and the results need no manual fixes. Faces already meet it on four references (4.32, lowest 3).
+
+### Done on 2026-11-12 (numbers: `docs/FACE_ROOT_CAUSE.md`, "Validation round")
+- Two validation rounds on four characters each (`bench_runs_validate`, $2.97; `bench_runs_validate2` on the
+  fixed code, $6.20 of which $2.25 was lost to a bug in the round script). The owner rated the second
+  (`benchmarks/validation_ratings.csv`): **faces 4.32** (25, lowest 3), **moves 3.57** (21, lowest 2; ref01 at 2.2,
+  "pose wrong", the other three at 4.0). The automatic face check failed 12 faces that the owner rated 4.5 on
+  average, so it is stricter than the owner.
+- Image sizes go with each drawing call (`images.generate(size=)`), never through the shared `[images] draft_size`;
+  touching figures on a pose sheet are cut at their thinnest columns; the face box is located once and kept.
+- Animations: the wide pose sheet for many frames, a check for coarse pixels with one redraw, and a readback at the
+  character's size for what remains.
+- Expressions: any face the user describes; the skin tone kept, the fringe out of bounds, the iris colour named;
+  a vision check of each face with one redraw.
+- `benchmarks/validation_round.py`: a resumable rating round and its rating sheet.
+
 ### Next: characters
-1. **A validation round for move sets and expressions** on several references, rated by the owner (one character
-   so far: ref05). Watch for drift in the frames' faces and for poses the layout holds back.
+1. **Text-only characters and their faces, rated by the owner**, then a second run of the set for repeatability.
+1c. **Calibrate the automatic face check to the owner** (it failed ref08 six times for a fringe the owner rated
+   4.5). Candidates: hair and eye colour as notes only, a redraw only when the face does not read or the skin
+   changed. This would bring a face back from about $0.10 to $0.06.
+1a. **Text-only characters** have no owner ratings yet (all ten rated characters came from reference images).
+1b. **A standing base sprite** for a seated or lying reference, or a question to the user, before animating.
 2. **Steering single pieces:** redo one animation frame or one expression with a note (the frames are separate
    PNGs; expressions already redo by name).
 3. **Faces inside animations:** let an animation use an expression (a hurt move with the hurt face) by pasting the
@@ -714,7 +748,7 @@ app sheet ("New object", "New background") and benchmark.
    character steps; the work is object-aware material labels, the size rules,
    skipping the face pass and animation, and an "item sheet" export. Done when three benchmark props (for
    example a weapon, a chest, a potion) export cleanly from a prompt.
-8. **Backgrounds/scenes:** the scenery backdrop is done (Scenes library, `pixelagent/steps/scene.py`; three
+8. **Backgrounds/scenes (frozen, off by default since 2026-11-12):** the scenery backdrop is done (Scenes library, `pixelagent/steps/scene.py`; three
    benchmark scenes, ~$0.25 each) and the walkable kit (Kits library, `pixelagent/steps/kit.py`; 32-px tiles
    from a painted terrain chunk, Tiled/Godot tilesets, ~$0.06 a kit). Next: an LDtk project file, a level composer. Design in `docs/BACKGROUNDS_DESIGN.md` (a scenery backdrop and a theme kit, after how
    Alice in Cradle assembles stages from chip sets). Originally sketched as a new pipeline (layout plan → per-layer concepts → per-layer conversion → targeted
@@ -748,6 +782,7 @@ app sheet ("New object", "New background") and benchmark.
 | Optimisation policy | Root causes across all benchmark characters, never per-example tweaks |
 | UI | Local web UI in an app window, Apple-style, packaged as an .exe |
 | Focus | Characters first. Objects and backgrounds later, from prompts, each as its own workflow (2026-11-09) |
+| Scope | An asset generator, not a game engine: characters and their expressions from prompts, at a high standard. Objects frozen; animations, scenes and kits off; no level composing (2026-11-12) |
 | Faces | Judged by the owner's blind ratings (benchmarks/face_lab.py), not by model judges |
 | Deleting | Recently Deleted inside the app with Restore, Delete Now and Delete All, instead of the Windows Recycle Bin (2026-11-09) |
 | Final pixels | Native: the image model's drawn pixels, read back, rebuilt in 3-6 tones a material and graded (palette grade medium, 2026-11-11). Backgrounds: converted pixels may remain, with targeted model passes (2026-11-09) |

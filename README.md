@@ -117,6 +117,11 @@ order showed position bias), so faces should be judged by eye. Tools: `benchmark
 (`--hybrid`, `--agent-tag`), `benchmarks/face_pass.py`, `pixelagent/judge.py`.
 
 ## Animation (M3): driven by your prompt
+**Off by default since 2026-11-12** (`config.toml [app] animations = true` brings back the Animations library, New
+animation and Move set; the command line below works either way). The owner rated moves made from one static sprite
+3.57 of 5 against 4.32 for expressions, and they fail on a front-facing or seated sprite. For simple motion, pair
+faces: neutral and blink make a blink, neutral and an open-mouth face a talking loop.
+
 ```
 python -m pixelagent --project P animate CHARACTER walk --prompt "6-frame walk cycle in place, the backpack bobs" --frames 6 --backend openai
 python -m pixelagent --project P approve CHARACTER-walk     # gate P: pose sheet  (or: reject ... --note "longer strides")
@@ -138,15 +143,23 @@ First real run (Mushroom Traveler, 96 px, 6-frame walk): plan + pose sheet $0.07
 69 rounds); identical 25-colour palette in all frames, opaque-area spread 3.3 %.
 
 With the pixel-art (Soft) look there is no drawing step: the pose sheet is drawn as pixel art on a layout of the
-finished sprite and each frame is read back from it (~$0.07 an animation). **Move set** (the app's button, or
+finished sprite and each frame is read back from it (~$0.07 an animation). When the frames would need pixels of
+under 5 image pixels, the sheet is drawn twice as wide (`[animation] sheet_wide`, same price): asked for 3-px
+pixels, the image model drew 4-px ones on a third of the sheets and those frames came out 25% small. A sheet whose
+pixels still come out coarse is drawn once more, and what remains is read back at the character's size. **Move set** (the app's button, or
 `benchmarks/move_set.py`): idle, walk, run, jump, attack and hurt at once, each its own animation (~$0.40 in all).
 
 ## Expressions
-A finished pixel-art character gets other faces (happy, sad, angry, surprised, hurt, blink): the vision model finds
-the face, the image model redraws only that area of the pixel-art concept, which is read back on the character's
-own grid and graded like it. Only the face changes, pixel for pixel; each comes as a whole sprite and as a face patch
-with its box (`expressions/expressions.json`) for games that swap faces. About $0.055 a face. In the app: the
-character's Expressions card; in code: `pixelagent.expressions.make(project, id, names)`.
+A finished pixel-art character gets other faces: six presets (happy, sad, angry, surprised, hurt, blink) or any face
+you describe ("a smug half-smile with one brow raised"). The vision model finds the face and names the eye colour,
+the image model redraws only that area of the pixel-art concept, and it is read back on the character's own grid and
+graded like it. Only the face changes, pixel for pixel; the fringe and side locks inside the face area are out of
+bounds, and a skin tone the edit shifted is moved back. Each face is then checked against the neutral one (reads as
+asked, same skin, same hair, same iris colour and eye style) and drawn once more with the findings when it fails;
+the better attempt is kept and a failed check is shown on the face. Each comes as a whole sprite and as a face patch
+with its box (`expressions/expressions.json`) for games that swap faces. About $0.06 a face, twice that when it is
+drawn again. In the app: the character's Expressions card; in code:
+`pixelagent.expressions.make(project, id, names, custom={"smug": "a smug half-smile"})`.
 
 ## Objects
 Items and props (the app's Objects library and New object, or `new ID --type prop --height 48`) run the
@@ -164,6 +177,9 @@ TexturePacker JSON (trimmed rectangles, cells, a bottom-centre pivot), a Godot 4
 PNGs and a README. Free.
 
 ## Scenes (parallax backdrops)
+**Experimental and off by default** (`config.toml [app] backgrounds = true` shows the Scenes and Kits libraries): the
+agent's focus is characters and their expressions (owner, 2026-11-12).
+
 A scene is its own asset (the app's Scenes library and New scene). From a description of a place, the director
 plans 3-5 layers, far to near: an opaque sky, then far, middle and near layers on transparency, sharing one horizon,
 light and palette. The image model draws each layer on its own, asked to repeat sideways: no left-right change in the
@@ -177,6 +193,8 @@ a Godot ParallaxBackground scene, a Tiled map with parallax image layers, a Unit
 About $0.25 a scene. Design and measurements: `docs/BACKGROUNDS_DESIGN.md`.
 
 ## Kits (walkable tiles)
+Experimental and off by default, like scenes.
+
 A kit is its own asset (the app's Kits library and New kit), and it can match a finished scene. The image model
 paints a terrain chunk over a layout image: a 6x4-tile ground block and a 4x1 platform at exact positions, with the
 decorations beside them. The chunk is read as pixel art with one palette and sliced into 28 32-px tiles by role:
