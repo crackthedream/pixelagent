@@ -695,8 +695,8 @@ motion comes from pairs of faces (neutral and blink, neutral and an open mouth).
 
 **Character generation is done when**, on a fixed set of the ten references plus five text prompts (a character
 and three expressions each): the owner's average rating is at least 4 with nothing below 3, a second run of the set
-rates alike, and the results need no manual fixes. After the first run (2026-11-13) every rated part is above the
-bar; open are the second run and the faces of six references.
+rates alike, and the results need no manual fixes. **Met on 2026-11-13** for everything rated: both runs are
+above the bar and the second rates at or above the first. Six references have characters rated but no faces.
 
 ### Done on 2026-11-12 (numbers: `docs/FACE_ROOT_CAUSE.md`, "Validation round")
 - Two validation rounds on four characters each (`bench_runs_validate`, $2.97; `bench_runs_validate2` on the
@@ -713,7 +713,9 @@ bar; open are the second run and the faces of six references.
 - `benchmarks/validation_round.py`: a resumable rating round and its rating sheet.
 
 ### Next: characters
-1. **A second run of the rated set, for repeatability.** The first run meets the bar: characters from text prompts
+1. **Character generation meets its bar** (2026-11-13). The second run, nine characters made again from scratch
+   and 27 faces, is rated 5 throughout (`bench_runs_validate4`, $2.92), so the results repeat. Not covered: faces
+   for six of the ten references (ref02, ref04-ref07, ref09). The first run: characters from text prompts
    5.0 (4 rated, 2026-11-13) and from references 4.8 (ten, 2026-11-10); faces 4.32 on four references and 4.92 on
    four text-prompt characters, 4.51 over all 37 with a lowest of 3 (`benchmarks/validation_ratings.csv`). Six of
    the ten references have no rated faces yet.

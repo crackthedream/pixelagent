@@ -505,3 +505,25 @@ of 3.
 - **Tried and taken back out:** freezing the worn item's pixels (as the fringe is frozen). The image model then
   drew a second pair of goggles in another colour over the frozen ones. Three paid tries went into this one
   character ($1.02); eyewear stays a case to watch, not a solved one.
+
+## The second run of the rated set (2026-11-13, `bench_runs_validate4`)
+
+The same nine characters made again from scratch (the five text prompts, and ref01, ref03, ref08 and ref10 from
+their reference images), then happy, angry and the described shy smile for each. $2.92 in all; rating sheet
+`rating.html` (36 items).
+
+**The owner's ratings** (2026-11-13, `benchmarks/validation_ratings.csv`): every rated item is a 5: eight sprites
+(the forest archer's was left unrated) and all 27 faces, including the knight's angry face that the check failed.
+The second run rates at or above the first on every character, so the results repeat. Over all rounds: 12 sprites
+at 5.0, and 64 faces at 4.72 with a lowest of 3.
+
+- **Characters:** $1.22 for nine ($0.127 from a prompt, $0.146 from a reference). By eye the quality and style
+  match the first run. The designs differ where a fresh draw would: the knight's visor is open (so it has a face
+  this time), the engineer wears her goggles on her forehead, ref10 stands with her book (the first run sat her on
+  a bench). Heights 121-143 px (first run 122-154): the image model still picks its own pixel count.
+- **Faces:** 27 for $1.70, $0.063 a face; 3 drawn twice; 26 pass the check (the knight's angry face fails).
+- **The image service's filter** rejected the mushroom traveler twice (its concept draft, then one of its faces;
+  "moderation_blocked", stage "output") although the same prompt passed the day before. Each went through on the
+  next try. A rejected face ends that request: the faces not yet drawn are left for the next one.
+- `validation_round.py`: `--refs` makes characters afresh from the reference cases; one failed character no longer
+  stops the round.

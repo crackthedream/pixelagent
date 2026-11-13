@@ -65,3 +65,39 @@ validate3,2026-11-13,mushroom_traveler,character,sprite,5,,
 validate3,2026-11-13,mushroom_traveler,face,happy,5,,
 validate3,2026-11-13,mushroom_traveler,face,angry,5,,
 validate3,2026-11-13,mushroom_traveler,face,shy,5,,the user's own expression
+validate4,2026-11-13,apprentice_mage,character,sprite,5,,
+validate4,2026-11-13,apprentice_mage,face,happy,5,,
+validate4,2026-11-13,apprentice_mage,face,angry,5,,
+validate4,2026-11-13,apprentice_mage,face,shy,5,,the user's own expression
+validate4,2026-11-13,armored_knight,character,sprite,5,,
+validate4,2026-11-13,armored_knight,face,happy,5,,
+validate4,2026-11-13,armored_knight,face,angry,5,,
+validate4,2026-11-13,armored_knight,face,shy,5,,the user's own expression
+validate4,2026-11-13,forest_archer,character,sprite,,,not rated
+validate4,2026-11-13,forest_archer,face,happy,5,,
+validate4,2026-11-13,forest_archer,face,angry,5,,
+validate4,2026-11-13,forest_archer,face,shy,5,,the user's own expression
+validate4,2026-11-13,mech_engineer,character,sprite,5,,
+validate4,2026-11-13,mech_engineer,face,happy,5,,
+validate4,2026-11-13,mech_engineer,face,angry,5,,
+validate4,2026-11-13,mech_engineer,face,shy,5,,the user's own expression
+validate4,2026-11-13,mushroom_traveler,character,sprite,5,,
+validate4,2026-11-13,mushroom_traveler,face,happy,5,,
+validate4,2026-11-13,mushroom_traveler,face,angry,5,,
+validate4,2026-11-13,mushroom_traveler,face,shy,5,,the user's own expression
+validate4,2026-11-13,ref01,character,sprite,5,,
+validate4,2026-11-13,ref01,face,happy,5,,
+validate4,2026-11-13,ref01,face,angry,5,,
+validate4,2026-11-13,ref01,face,shy,5,,the user's own expression
+validate4,2026-11-13,ref03,character,sprite,5,,
+validate4,2026-11-13,ref03,face,happy,5,,
+validate4,2026-11-13,ref03,face,angry,5,,
+validate4,2026-11-13,ref03,face,shy,5,,the user's own expression
+validate4,2026-11-13,ref08,character,sprite,5,,
+validate4,2026-11-13,ref08,face,happy,5,,
+validate4,2026-11-13,ref08,face,angry,5,,
+validate4,2026-11-13,ref08,face,shy,5,,the user's own expression
+validate4,2026-11-13,ref10,character,sprite,5,,
+validate4,2026-11-13,ref10,face,happy,5,,
+validate4,2026-11-13,ref10,face,angry,5,,
+validate4,2026-11-13,ref10,face,shy,5,,the user's own expression

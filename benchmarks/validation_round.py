@@ -9,6 +9,7 @@ sheet (rating.html) with a 1-5 score, problem tags and a note for each move and 
 
 run:   --cases makes characters from the text prompts of benchmarks/cases.csv (rows with input "prompt"), with
        --drafts concept drafts (1: the round approves the first draft itself, so more would be paid for unseen).
+       --refs makes characters afresh from the reference images of benchmarks/cases_refs.csv (a repeat run).
        Other characters missing from the project are copied from --source (finished characters; their old faces are left
        behind) and redone from the colour step, so they carry today's palette grade. Then every move of the move set
        for --moves and the six preset faces (plus --custom ones) for --faces. Finished pieces are kept: run it again
@@ -62,6 +63,13 @@ def prompt_cases():
         return {r["id"]: r["source"] for r in csv.DictReader(f) if r["input"] == "prompt"}
 
 
+def ref_cases():
+    """benchmarks/cases_refs.csv rows made from a reference image: id -> the image's path."""
+    import csv
+    with open(os.path.join(HERE, "cases_refs.csv"), encoding="utf-8", newline="") as f:
+        return {r["id"]: os.path.join(HERE, r["source"]) for r in csv.DictReader(f) if r["input"] == "reference"}
+
+
 def run(a):
     moves_for = [c for c in a.moves.split(",") if c]
     faces_for = [c for c in a.faces.split(",") if c]
@@ -76,6 +84,14 @@ def run(a):
             sys.exit(f"{cid}: not a prompt case of benchmarks/cases.csv")
         if not os.path.exists(os.path.join(a.project, "assets", cid)):
             Project(a.project, {"backend": {"mode": a.mode}}).new_asset(cid, {"prompt": known[cid]})
+    refs_for = [c for c in a.refs.split(",") if c]
+    images = ref_cases() if refs_for else {}
+    for cid in refs_for:
+        if cid not in images or not os.path.exists(images[cid]):
+            sys.exit(f"{cid}: no reference image in benchmarks/cases_refs.csv")
+        if not os.path.exists(os.path.join(a.project, "assets", cid)):
+            Project(a.project, {"backend": {"mode": a.mode}}).new_asset(cid, {"references": [images[cid]]})
+    cases_for = cases_for + refs_for
     for cid in dict.fromkeys(moves_for + faces_for):
         d = os.path.join(a.project, "assets", cid)
         if not os.path.exists(d):
@@ -86,6 +102,7 @@ def run(a):
             fresh.append(cid)
     proj = Project(a.project, {"backend": {"mode": a.mode}, "budget": {"concept_drafts": a.drafts}})
     start = spent(a.project)
+    failed = set()
     for cid in dict.fromkeys(cases_for + moves_for + faces_for):
         p = Pipeline(proj, cid)
         if cid in fresh:
@@ -95,8 +112,13 @@ def run(a):
             try:
                 print(f"{cid}: character {p.run(auto_approve=True, log=quiet)}", flush=True)
             except Exception as e:  # noqa: BLE001
-                sys.exit(f"{cid}: the character could not be finished: {e}" +
-                         ("\nThe API account has no credits left: add credits and run this again." if out_of_credit(e) else ""))
+                if out_of_credit(e):
+                    sys.exit(f"{cid}: the character could not be finished: {e}\n"
+                             "The API account has no credits left: add credits and run this again.")
+                # one character's failure (a draft rejected by the image service's filter) does not stop the round:
+                # the others go on, and running the round again tries this one again
+                print(f"{cid}: the character could not be finished, left out: {str(e)[:200]}", flush=True)
+                failed.add(cid)
     stop = threading.Event()
     lock = threading.Lock()
 
@@ -149,7 +171,8 @@ def run(a):
             if out_of_credit(e):
                 stop.set()
 
-    face_threads = [threading.Thread(target=faces, args=(c,)) for c in faces_for]
+    moves_for = [c for c in moves_for if c not in failed]
+    face_threads = [threading.Thread(target=faces, args=(c,)) for c in faces_for if c not in failed]
     for t in face_threads:
         t.start()
     for cid in moves_for:                                 # one character's six moves at a time
@@ -325,6 +348,7 @@ def main():
     r.add_argument("--redo-faces", action="store_true", help="draw the faces again even where they exist")
     r.add_argument("--cases", default="", help="prompt cases of benchmarks/cases.csv to make characters from")
     r.add_argument("--drafts", type=int, default=1, help="concept drafts for a character made from a prompt")
+    r.add_argument("--refs", default="", help="reference cases of benchmarks/cases_refs.csv to make characters from")
     r.add_argument("--face-names", default="", help="the preset faces to draw (default: all six)")
     r.add_argument("--mode", default="openai", choices=["openai", "dry_run"])
     r.set_defaults(fn=run)
