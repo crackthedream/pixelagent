@@ -68,6 +68,9 @@ class FaceLocation(BaseModel):
     y1: float = Field(description="bottom edge (just below the mouth), 0-1 of the height")
     eye_colour: str = Field(default="", description="the colour of the irises in one or two plain words, for example "
                                                     "'green' or 'orange-amber'; empty when the eyes are closed or hidden")
+    wears: str = Field(default="", description="what the face wears or is marked with, in a few words, for example "
+                                               "'round orange goggles' or 'a scar across the left cheek'; empty when "
+                                               "nothing")
 
 
 def _sprite_index(edges, v, offset):
@@ -93,6 +96,7 @@ def locate_face(backend, concept_path, geom, size, seen=None):
         return None
     if seen is not None:
         seen["eye_colour"] = " ".join(str(r.eye_colour or "").split())[:40]
+        seen["wears"] = " ".join(str(r.wears or "").split())[:80]
     g, m = geom["grid"], geom["margin"]
     ox, oy = m - geom["crop"][0], m - geom["crop"][1]
     w, h = size
@@ -145,7 +149,10 @@ class FaceCheck(BaseModel):
     same_hair: bool = Field(description="the hair (fringe, side locks) is unchanged")
     eyes_in_style: bool = Field(description="open eyes keep the original iris colour and drawing style (true when "
                                             "the expression closes the eyes)")
-    issue: str = Field(description="what is wrong, in one short sentence; empty when all four are true")
+    same_wear: bool = Field(default=True, description="everything worn or marked on the original face (glasses, "
+                                                      "goggles, a mask, face paint, a scar) is still there with the "
+                                                      "same shape and colours; true when the face wears nothing")
+    issue: str = Field(description="what is wrong, in one short sentence; empty when everything is true")
 
 
 def safe_name(text):
@@ -251,22 +258,30 @@ def judge(backend, neutral, face, text, out_path):
     pair.convert("RGB").save(out_path)
 
     def stub():
-        return FaceCheck(reads=True, same_skin=True, same_hair=True, eyes_in_style=True, issue="")
+        return FaceCheck(reads=True, same_skin=True, same_wear=True, same_hair=True, eyes_in_style=True, issue="")
     return backend.llm.structured("vision_pick", prompts.FACE_CHECK.format(expression=text), "Check the new face.",
                                   [out_path], FaceCheck, stub)
 
 
-def _score(check):
-    return sum(bool(check.get(k)) for k in ("reads", "same_skin", "same_hair", "eyes_in_style")) + check.get("skin_kept", 0)
+FINDINGS = ("reads", "same_skin", "same_wear", "same_hair", "eyes_in_style")
 
 
-FAIL_ON = ("reads", "same_skin")
+def _score(check, fail_on=()):
+    """Which of two attempts is better: first by the findings that can fail a face, then by the notes and the
+    share of skin kept. Without the weight, a redrawn face that had its goggles back lost to the first one
+    without them, because drawing the goggles changed more skin pixels (2026-11-12)."""
+    return (10 * sum(bool(check.get(k, True)) for k in fail_on)
+            + sum(bool(check.get(k, True)) for k in FINDINGS if k not in fail_on) + check.get("skin_kept", 0))
+
+
+FAIL_ON = ("reads", "same_skin", "same_wear")
 
 
 def passes(check, min_skin=0.5, fail_on=FAIL_ON):
     """Does a face pass its check? Only the findings in `fail_on` ([expressions] fail_on) and the measured share of
     skin kept can fail it. The hair and eye-colour findings are notes: they failed faces the owner rated highest
-    (ref08's six, rated 4.5 of 5, all failed for the fringe), and each failure cost a second drawing."""
+    (ref08's six, rated 4.5 of 5, all failed for the fringe), and each failure cost a second drawing. What the face
+    wears does count: the engineer's orange goggles became thin dark glasses in all three faces (2026-11-12)."""
     return all(check.get(k, True) for k in fail_on) and check.get("skin_kept", 1.0) >= min_skin
 
 
@@ -302,7 +317,7 @@ def make(proj, aid, names=None, log=print, mode=None, reuse=False, custom=None, 
     backend = make_backend(proj, aid, mode)
     ecfg = proj.config.get("expressions", {})
     fail_on = tuple(ecfg.get("fail_on", FAIL_ON))
-    unknown = [k for k in fail_on if k not in ("reads", "same_skin", "same_hair", "eyes_in_style")]
+    unknown = [k for k in fail_on if k not in FINDINGS]
     if unknown:
         raise ValueError(f"[expressions] fail_on: unknown finding {', '.join(unknown)}")
     out_dir = os.path.join(a.dir, "expressions")
@@ -311,10 +326,10 @@ def make(proj, aid, names=None, log=print, mode=None, reuse=False, custom=None, 
     if os.path.exists(path):
         with open(path, encoding="utf-8") as f:
             earlier = json.load(f)
-    seen = {"eye_colour": earlier.get("eye_colour", "")}
+    seen = {k: earlier.get(k, "") for k in ("eye_colour", "wears")}
     if earlier.get("face_box") and (reuse or not relocate):
         box = tuple(earlier["face_box"])
-        if not reuse and "eye_colour" not in earlier:       # a set from before the eye colour was asked for
+        if not reuse and any(k not in earlier for k in seen):   # a set from before these were asked for
             locate_face(backend, a.output("concept", "concept"), geom, (w, h), seen)
     else:
         box = locate_face(backend, a.output("concept", "concept"), geom, (w, h), seen)
@@ -332,6 +347,8 @@ def make(proj, aid, names=None, log=print, mode=None, reuse=False, custom=None, 
     editable[box[1]:box[3], box[0]:box[2]] = final_a[box[1]:box[3], box[0]:box[2], 3] > 0
     hair = hair_zone(final_a, box)
     editable &= ~hair                                    # the fringe and side locks stay pixel for pixel
+    # What the face wears (goggles, glasses) is named in the prompt and checked, not frozen: with its pixels frozen
+    # the image model drew a second pair over them in another colour (the engineer, 2026-11-12).
     cbox = _concept_box(geom, box)
     os.makedirs(out_dir, exist_ok=True)
     src = Image.new("RGBA", concept.size, (222, 222, 226, 255))
@@ -345,8 +362,11 @@ def make(proj, aid, names=None, log=print, mode=None, reuse=False, custom=None, 
     from .steps.build import GRADES
     to_final = colour_map(final, GRADES.get(str(proj.config.get("finish", {}).get("grade", "medium"))))
     face_size = f"{concept.width}x{concept.height}"     # passed with each call (never via the shared config)
-    result = {"face_box": list(box), "size": [w, h], "eye_colour": seen["eye_colour"], "expressions": {}}
+    result = {"face_box": list(box), "size": [w, h], "eye_colour": seen["eye_colour"], "wears": seen.get("wears", ""),
+              "expressions": {}}
     eyes = prompts.EXPRESSION_EYES.format(colour=seen["eye_colour"]) if seen["eye_colour"] else ""
+    if seen.get("wears"):
+        eyes += prompts.EXPRESSION_WEARS.format(wears=seen["wears"])
     if earlier.get("face_box") and tuple(earlier["face_box"]) == tuple(box):   # the same face: earlier ones still fit
         result["expressions"] = earlier.get("expressions", {})
     pad = max(8, (cbox[2] - cbox[0]) // 6)                 # the judge sees the face with a little of its surroundings
@@ -396,10 +416,10 @@ def make(proj, aid, names=None, log=print, mode=None, reuse=False, custom=None, 
             if not reuse and ecfg.get("judge", True):
                 v = judge(backend, src.crop(view), drawn, text,
                           os.path.join(out_dir, "_generated", f"{n}_check{k}.png"))
-                check.update(reads=v.reads, same_skin=v.same_skin, same_hair=v.same_hair,
+                check.update(reads=v.reads, same_skin=v.same_skin, same_wear=v.same_wear, same_hair=v.same_hair,
                              eyes_in_style=v.eyes_in_style, issue=v.issue)
             cand = {"sprite": sprite, "changed": changed, "check": check, "attempt": k + 1}
-            if best is None or _score(check) >= _score(best["check"]):   # a tie: the attempt that had the note
+            if best is None or _score(check, fail_on) >= _score(best["check"], fail_on):   # a tie: the one with the note
                 best = cand
             if passes(check, float(ecfg.get("min_skin_kept", 0.5)), fail_on):
                 break

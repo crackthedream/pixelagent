@@ -477,3 +477,31 @@ not read" and "the skin changed" (the vision finding or the measured share of sk
 second drawing. The hair and eye-colour findings are recorded and shown as a note. Of the 19 faces of the second
 round with a stored check, 9 failed under the old rule and none fails under the new one. Not yet run with the real
 models: the saving (a face back from about $0.10 to $0.06) is the expected one.
+
+## Characters from text prompts (2026-11-12, `bench_runs_validate3`)
+
+The owner's five prompts of `benchmarks/cases.csv` (forest archer, mechanical engineer, apprentice mage, armored
+knight, mushroom traveler), one concept draft each, then three faces: happy, angry and the owner-style description
+"a shy, embarrassed smile with the eyes looking away". $2.56 in all; rating sheet `rating.html` (17 items: the five
+sprites and twelve faces).
+
+**The owner's ratings** (2026-11-13, `benchmarks/validation_ratings.csv`): the four sprites rated are all 5 (the
+apprentice mage's sprite was left unrated); the twelve faces average **4.92**, eleven at 5 and one at 4 (the mage's
+angry face). The four described "shy" faces are all 5. Over both rated rounds, 37 faces average 4.51 with a lowest
+of 3.
+
+- **Characters:** $0.64 for five ($0.128 each, 122-144 px tall). By eye each matches its prompt, with clean pixel
+  art and a clear silhouette.
+- **A character without a visible face** (the knight's closed helmet): the locator says so and no face is drawn
+  ("no face found in the character"); only the locating call is paid.
+- **The loosened check in real use:** the first pass drew 12 faces for $0.79, $0.066 a face, with 2 of 12 drawn
+  twice (second round, strict check: $0.10 a face, 19 of 25 drawn twice).
+- **What the face wears.** The engineer's orange goggles became thin dark glasses or vanished in all three faces,
+  and nothing checked for it. Now: the locator names what the face wears ("round orange goggles") and the prompt
+  states it; the check has a finding `same_wear`, which fails a face; and the better of two attempts is chosen by
+  the findings that can fail a face first (`expressions._score`), since the redraw with its goggles back had lost
+  to the first one without them on the count of skin pixels kept. With these, happy and angry kept the goggles on
+  the first attempt.
+- **Tried and taken back out:** freezing the worn item's pixels (as the fringe is frozen). The image model then
+  drew a second pair of goggles in another colour over the frozen ones. Three paid tries went into this one
+  character ($1.02); eyewear stays a case to watch, not a solved one.

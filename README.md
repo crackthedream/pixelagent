@@ -151,12 +151,14 @@ pixels still come out coarse is drawn once more, and what remains is read back a
 
 ## Expressions
 A finished pixel-art character gets other faces: six presets (happy, sad, angry, surprised, hurt, blink) or any face
-you describe ("a smug half-smile with one brow raised"). The vision model finds the face and names the eye colour,
+you describe ("a smug half-smile with one brow raised"). The vision model finds the face and names the eye colour
+and what the face wears (glasses, goggles),
 the image model redraws only that area of the pixel-art concept, and it is read back on the character's own grid and
 graded like it. Only the face changes, pixel for pixel; the fringe and side locks inside the face area are out of
 bounds, and a skin tone the edit shifted is moved back. Each face is then checked against the neutral one (reads as
-asked, same skin, same hair, same iris colour and eye style). A face that does not read or whose skin changed is
-drawn once more with the findings, and the better attempt is kept; a failed check is shown on the face. The hair and
+asked, same skin, the same things worn, same hair, same iris colour and eye style). A face that does not read,
+whose skin changed or that lost what it wears is drawn once more with the findings, and the better attempt is kept;
+a failed check is shown on the face. A character whose face cannot be seen (a closed helmet) gets no faces. The hair and
 eye findings are notes only (`[expressions] fail_on`): they failed the faces the owner rated highest. Each comes as a whole sprite and as a face patch
 with its box (`expressions/expressions.json`) for games that swap faces. About $0.06 a face, twice that when it is
 drawn again (rare since the hair and eye findings became notes). In the app: the character's Expressions card; in code:

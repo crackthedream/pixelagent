@@ -115,7 +115,8 @@ background. The result must look like the same illustration with only the reques
 
 LOCATE_FACE = """This is a pixel-art game character shown enlarged. Give the tight box around its FACE FEATURES: both
 eyes, the brows and the mouth (not the whole head, not the hair), as fractions 0-1 of the image width and height.
-found=false when the face cannot be seen. Also name the colour of the irises in one or two plain words."""
+found=false when the face cannot be seen. Also name the colour of the irises in one or two plain words, and what the
+face wears or is marked with (glasses, goggles, a mask, face paint, a scar), if anything."""
 
 # scene backdrops (pixelagent/steps/scene.py)
 SCENE_PLAN = """Plan a parallax backdrop for a 2D side-scrolling pixel-art action game (the look of modern hand-made
@@ -172,11 +173,17 @@ Do NOT repaint the skin or the hair: every skin pixel that the expression does n
 the fringe and side locks stay pixel for pixel. This is the SAME character: open eyes keep their own iris colour,
 lashes and highlights and the way they are drawn (change their shape and openness only as the expression needs);
 brows and mouth are a few designed pixels in the original face's style -- vivid and simple, like a pixel-art game
-character's expression. Everything else stays exactly as it is."""
+character's expression. Whatever the face wears or is marked with (glasses, goggles, a mask, face paint, a scar,
+freckles) stays exactly as it is, the same shape, size and colours: draw the expression behind or around it.
+Everything else stays exactly as it is."""
 
 EXPRESSION_EYES = """
 Whenever the eyes are open, the irises keep exactly the colours they have in the original image (they look
 {colour}): the same hue, not brighter and not more saturated."""
+
+EXPRESSION_WEARS = """
+The face wears {wears}: keep it exactly as it is drawn in the original image -- the same shape, size, colours and
+place. The eyes show through or behind it as they do in the original."""
 
 EXPRESSION_RETRY = """
 IMPORTANT: an earlier attempt was rejected: {issue}. Fix exactly that."""
@@ -190,7 +197,10 @@ LEFT one:
   lighter, darker or differently tinted skin is not);
 - same_hair: the fringe and side locks have the same shape and colours (small pixel noise is fine);
 - eyes_in_style: open eyes keep the original IRIS COLOUR and are drawn in the same style -- an iris that changed
-  colour (for example green to red or brown) or blank white eyes fail; true when the expression closes the eyes.
+  colour (for example green to red or brown) or blank white eyes fail; true when the expression closes the eyes;
+- same_wear: everything worn or marked on the original face (glasses, goggles, a mask, face paint, a scar) is
+  still there with the same shape and colours -- goggles that became thin glasses, or vanished, fail; true when
+  the original face wears nothing.
 Fail only what is clearly wrong."""
 
 REFINE_CONCEPT = """Refine this concept for pixel-art conversion without changing the design: keep identity, pose,

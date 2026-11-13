@@ -3,9 +3,13 @@ sheet (rating.html) with a 1-5 score, problem tags and a note for each move and 
 
   python benchmarks/validation_round.py run   --project bench_runs_validate2 --source bench_runs_native_batch \
          --moves ref01,ref03,ref08,ref06 --faces ref01,ref03,ref08,ref10 [--custom "smug=a smug half-smile"] [--mode dry_run]
+  python benchmarks/validation_round.py run   --project bench_runs_validate3 --cases forest_archer,mech_engineer \
+         --faces forest_archer,mech_engineer --face-names happy,angry --custom "shy=a shy smile, eyes looking away"
   python benchmarks/validation_round.py sheet --project bench_runs_validate2
 
-run:   characters missing from the project are copied from --source (finished characters; their old faces are left
+run:   --cases makes characters from the text prompts of benchmarks/cases.csv (rows with input "prompt"), with
+       --drafts concept drafts (1: the round approves the first draft itself, so more would be paid for unseen).
+       Other characters missing from the project are copied from --source (finished characters; their old faces are left
        behind) and redone from the colour step, so they carry today's palette grade. Then every move of the move set
        for --moves and the six preset faces (plus --custom ones) for --faces. Finished pieces are kept: run it again
        after a stop (a spending limit, no credits) and it carries on. --redo-faces draws the faces again.
@@ -32,6 +36,7 @@ from pixelagent.store import Project  # noqa: E402
 
 MOVE_TAGS = ["face drifts", "size jumps", "pose wrong", "off-model", "jittery"]
 FACE_TAGS = ["doesn't read", "off-model", "wrong colours", "too frontal"]
+CHAR_TAGS = ["not what I asked", "muddy pixels", "bad proportions", "weak face", "wrong colours"]
 
 
 def quiet(*_a, **_k):
@@ -50,12 +55,27 @@ def out_of_credit(e):
     return "credit" in str(e).lower() or "insufficient_quota" in str(e)
 
 
+def prompt_cases():
+    """benchmarks/cases.csv rows made from a text prompt: id -> the prompt."""
+    import csv
+    with open(os.path.join(HERE, "cases.csv"), encoding="utf-8", newline="") as f:
+        return {r["id"]: r["source"] for r in csv.DictReader(f) if r["input"] == "prompt"}
+
+
 def run(a):
     moves_for = [c for c in a.moves.split(",") if c]
     faces_for = [c for c in a.faces.split(",") if c]
+    cases_for = [c for c in a.cases.split(",") if c]
+    presets = [n for n in a.face_names.split(",") if n] if a.face_names else list(expressions.EXPRESSIONS)
     custom = dict(kv.split("=", 1) for kv in a.custom) if a.custom else {}
     os.makedirs(os.path.join(a.project, "assets"), exist_ok=True)
     fresh = []
+    known = prompt_cases() if cases_for else {}
+    for cid in cases_for:
+        if cid not in known:
+            sys.exit(f"{cid}: not a prompt case of benchmarks/cases.csv")
+        if not os.path.exists(os.path.join(a.project, "assets", cid)):
+            Project(a.project, {"backend": {"mode": a.mode}}).new_asset(cid, {"prompt": known[cid]})
     for cid in dict.fromkeys(moves_for + faces_for):
         d = os.path.join(a.project, "assets", cid)
         if not os.path.exists(d):
@@ -64,9 +84,9 @@ def run(a):
                 sys.exit(f"{cid}: not in {a.project} and not in {a.source}")
             shutil.copytree(src, d, ignore=shutil.ignore_patterns("expressions"))
             fresh.append(cid)
-    proj = Project(a.project, {"backend": {"mode": a.mode}})
+    proj = Project(a.project, {"backend": {"mode": a.mode}, "budget": {"concept_drafts": a.drafts}})
     start = spent(a.project)
-    for cid in dict.fromkeys(moves_for + faces_for):
+    for cid in dict.fromkeys(cases_for + moves_for + faces_for):
         p = Pipeline(proj, cid)
         if cid in fresh:
             p.reset_from("rebuild")                       # today's colours
@@ -115,7 +135,7 @@ def run(a):
         if os.path.exists(path) and not a.redo_faces:
             with open(path, encoding="utf-8") as f:
                 have = json.load(f).get("expressions", {})
-        names = [n for n in expressions.EXPRESSIONS if n not in have]
+        names = [n for n in presets if n not in have]
         own = {k: v for k, v in custom.items() if expressions.safe_name(k) not in have}
         if not names and not own:
             return
@@ -178,6 +198,7 @@ figcaption{font-weight:600;text-transform:capitalize}figcaption small{font-weigh
 .stage{background:var(--stage);border-radius:8px;display:flex;justify-content:center;align-items:flex-end;padding:8px;min-height:120px;overflow:hidden}
 .strip{overflow-x:auto;background:var(--stage);border-radius:8px;padding:4px}
 .px{image-rendering:pixelated;display:block}.auto{margin:0;font-size:12px;color:var(--sub)}
+.asked{max-width:60ch;font-size:13px}.self{max-width:340px;margin-top:8px}.who{flex-wrap:wrap}
 .seg{display:flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}.seg label{flex:1}
 .seg input{position:absolute;opacity:0}.seg span{display:block;text-align:center;padding:5px 0;cursor:pointer;border-right:1px solid var(--line)}
 .seg label:last-child span{border-right:0}.seg input:checked+span{background:var(--acc);color:#fff}
@@ -268,19 +289,22 @@ def sheet(a):
                              f'data-zoom="2" src="{rel(whole)}" alt="{html.escape(name)} sprite"></details>'
                              + (f'<p class="auto" title="{html.escape(e.get("note", ""))}">{auto}</p>' if auto else "")
                              + f'{rate(cid, "face", name, FACE_TAGS)}</figure>')
-        if not moves and not faces:
-            continue
+        asked = ch.state.inputs.get("prompt") or ""
+        noface = "" if faces or not os.path.isdir(os.path.join(ch.dir, "expressions")) and not asked else \
+            '<p class="auto">No faces: the face is not visible on this character.</p>'
         nav.append(f'<a href="#{cid}">{cid}</a>')
-        sections.append(f'<section id="{cid}"><header class="who"><img class="px" data-zoom="2" src="{rel(final)}" '
+        sections.append(f'<section id="{cid}"><header class="who"><img class="px" data-zoom="3" src="{rel(final)}" '
                         f'alt="{html.escape(title)}"><div><h2>{html.escape(title)}</h2><p>{cid}, {im.width}×{im.height} px'
-                        '</p></div></header>'
+                        '</p>' + (f'<p class="asked">{html.escape(asked)}</p>' if asked else "")
+                        + f'<div class="card self">{rate(cid, "character", "sprite", CHAR_TAGS)}</div></div></header>'
+                        + ("" if faces else noface)
                         + (f'<h3>Moves</h3><div class="grid">{"".join(moves)}</div>' if moves else "")
                         + (f'<h3>Faces</h3><div class="grid">{"".join(faces)}</div>' if faces else "") + '</section>')
     page = ('<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" '
             f'content="width=device-width,initial-scale=1"><title>Validation round</title><style>{CSS}</style></head><body>'
             f'<div class="bar"><h1>Validation round</h1>{"".join(nav)}<span class="sp"></span><output id="count"></output>'
             '<button class="alt" id="dl">Download CSV</button><button id="copy">Copy ratings</button></div>'
-            '<main><p class="intro">Rate each move and face from 1 (unusable) to 5 (ship it), against the finished sprite. '
+            '<main><p class="intro">Rate each character, move and face from 1 (unusable) to 5 (ship it); moves and faces against the finished sprite. '
             'Mark what is wrong with the tags. When you are done, press Copy ratings and paste the result into the chat. '
             f'Your answers are kept in this browser as you go.</p>{"".join(sections)}</main><script>{JS}</script></body></html>')
     out = os.path.join(root, "rating.html")
@@ -299,6 +323,9 @@ def main():
     r.add_argument("--faces", default="")
     r.add_argument("--custom", action="append", help='name=description of a face of your own (repeatable)')
     r.add_argument("--redo-faces", action="store_true", help="draw the faces again even where they exist")
+    r.add_argument("--cases", default="", help="prompt cases of benchmarks/cases.csv to make characters from")
+    r.add_argument("--drafts", type=int, default=1, help="concept drafts for a character made from a prompt")
+    r.add_argument("--face-names", default="", help="the preset faces to draw (default: all six)")
     r.add_argument("--mode", default="openai", choices=["openai", "dry_run"])
     r.set_defaults(fn=run)
     s = sub.add_parser("sheet")

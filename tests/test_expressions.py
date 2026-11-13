@@ -92,6 +92,14 @@ class ExpressionTests(unittest.TestCase):
         f[8:15, 2:18] = hair                                   # hair over most of the box: not a fringe, no zone
         self.assertFalse(hair_zone(f, box).any())
 
+    def test_the_better_attempt_is_the_one_that_fixes_what_counts(self):
+        from pixelagent.expressions import FAIL_ON, _score
+        ok = {"reads": True, "same_skin": True, "same_wear": True, "same_hair": True, "eyes_in_style": True}
+        no_goggles = {**ok, "same_wear": False, "skin_kept": 0.87}        # the first attempt: tidy, goggles gone
+        goggles_back = {**ok, "same_hair": False, "skin_kept": 0.55}      # the redraw: goggles back, more pixels changed
+        self.assertGreater(_score(goggles_back, FAIL_ON), _score(no_goggles, FAIL_ON))
+        self.assertGreater(_score({**ok, "skin_kept": 0.9}, FAIL_ON), _score({**ok, "skin_kept": 0.6}, FAIL_ON))
+
     def test_names_and_the_pass_rule(self):
         self.assertEqual(safe_name("Smug!"), "smug")
         self.assertEqual(safe_name("a shy, blushing smile"), "a-shy-blushing-smile")
@@ -101,6 +109,7 @@ class ExpressionTests(unittest.TestCase):
         self.assertTrue(passes(ok))
         self.assertFalse(passes({**ok, "reads": False}))
         self.assertFalse(passes({**ok, "same_skin": False}))
+        self.assertFalse(passes({**ok, "same_wear": False}))                     # lost goggles do count
         self.assertFalse(passes({**ok, "skin_kept": 0.2}))
         # hair and eye findings are notes: they failed the faces the owner rated highest
         self.assertTrue(passes({**ok, "eyes_in_style": False, "same_hair": False}))

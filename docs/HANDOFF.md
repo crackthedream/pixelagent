@@ -695,7 +695,8 @@ motion comes from pairs of faces (neutral and blink, neutral and an open mouth).
 
 **Character generation is done when**, on a fixed set of the ten references plus five text prompts (a character
 and three expressions each): the owner's average rating is at least 4 with nothing below 3, a second run of the set
-rates alike, and the results need no manual fixes. Faces already meet it on four references (4.32, lowest 3).
+rates alike, and the results need no manual fixes. After the first run (2026-11-13) every rated part is above the
+bar; open are the second run and the faces of six references.
 
 ### Done on 2026-11-12 (numbers: `docs/FACE_ROOT_CAUSE.md`, "Validation round")
 - Two validation rounds on four characters each (`bench_runs_validate`, $2.97; `bench_runs_validate2` on the
@@ -712,7 +713,12 @@ rates alike, and the results need no manual fixes. Faces already meet it on four
 - `benchmarks/validation_round.py`: a resumable rating round and its rating sheet.
 
 ### Next: characters
-1. **Text-only characters and their faces, rated by the owner**, then a second run of the set for repeatability.
+1. **A second run of the rated set, for repeatability.** The first run meets the bar: characters from text prompts
+   5.0 (4 rated, 2026-11-13) and from references 4.8 (ten, 2026-11-10); faces 4.32 on four references and 4.92 on
+   four text-prompt characters, 4.51 over all 37 with a lowest of 3 (`benchmarks/validation_ratings.csv`). Six of
+   the ten references have no rated faces yet.
+1d. **Faces under eyewear** (the engineer's goggles): named in the prompt and checked (`same_wear`); watch it on
+   more characters with glasses or masks.
 1c. Done 2026-11-12: the automatic face check is calibrated to the owner. Hair and eye colour are notes only; a
    redraw happens when the face does not read or the skin changed (`[expressions] fail_on`). Expected: a face back
    from about $0.10 to $0.06; confirm on the next paid round.
