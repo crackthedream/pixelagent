@@ -1,0 +1,22 @@
+PixelAgent for Windows x64
+
+Extract the entire ZIP to a folder you can write to, then double-click PixelAgent.exe.
+The executable includes Python, the drawing engine and the desktop interface.
+The window uses Edge, Chrome or your default browser and connects to the app on this computer.
+
+Try a free character
+1. Open Settings and choose Test run under Mode. Click Save settings.
+2. Create a project and a character. Describe the character and start the run.
+3. Approve the plan, select a concept and approve the finished sprite.
+4. Add an expression, then save the Game pack from Exports. It includes the atlas,
+   frame metadata and a Godot SpriteFrames resource. Test run uses placeholder art.
+
+Generate with OpenAI
+In Settings, enter your own OpenAI API key, choose OpenAI mode, review the item and
+monthly limits, and save. This mode needs internet access and a billable API account
+with access to the configured models. The key is stored in your Windows user
+environment. The spending display estimates charges from the API usage response.
+
+Projects are stored in Documents\PixelAgent by default. You can change the folder
+in Settings. Editing an exported image in the separate PixelLiner application
+requires that editor to be installed.

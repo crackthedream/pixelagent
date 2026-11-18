@@ -307,7 +307,7 @@ async function renderDetail(id, fromRefresh) {
     return;
   }
   const sig = JSON.stringify([d.status, d.running, d.steps.map((s) => [s.status, s.version]), d.gate, d.log.length, d.job_error,
-    d.live && d.live.url]);
+    d.live && d.live.url, d.cancelling, d.expressions_stale, d.expressions]);
   schedulePoll(d.running ? 1500 : 0);
   if (fromRefresh && sig === state.detailSig) return;   // nothing changed: keep the page (and anything typed) as is
   state.detailSig = sig;
@@ -450,6 +450,7 @@ function inspector(d) {
   if (d.kind === "character" && d.status === "complete") {
     const ex = d.expressions || [];
     html += `<div class="card"><h2>Expressions</h2>
+      ${d.expressions_stale ? `<p class="muted">The earlier expressions are kept in this character’s folder. Make a new set for the current character before exporting them.</p>` : ""}
       ${ex.length ? `<div class="expr-grid">${ex.map((e) => `<figure class="expr"><a class="stage" href="${esc(e.x4)}" target="_blank" rel="noopener" title="${esc(e.note || "Open the whole sprite at 4×")}">${stageImg(e.face, e.name)}</a>
         <figcaption>${esc(e.name)} <a href="${esc(e.url)}" download>PNG</a> <a href="${esc(e.face)}" download>Face</a>${e.passed === false ? `<span class="expr-warn" title="${esc(e.issue || "This face did not pass its check against the original.")}">Check this face</span>` : e.issue ? `<span class="expr-note" title="${esc(e.issue)}">Note</span>` : ""}</figcaption></figure>`).join("")}</div>`
         : `<p class="muted" style="margin:0 0 10px">The same sprite with another face: happy, sad, angry, or any face you describe. Only the face changes, so a game can swap the face alone.</p>`}

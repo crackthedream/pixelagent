@@ -18,7 +18,7 @@ import zipfile
 
 from PIL import Image
 
-from . import imaging
+from . import expressions, imaging
 from .names import safe_filename
 
 GODOT_FPS = 100.0    # a Godot animation's speed; each frame's duration is its milliseconds / 10 (exact timing)
@@ -41,14 +41,11 @@ def _clips(proj, cid):
         meta = json.load(f)
     pivot = tuple(meta.get("pivot") or (sprite.width // 2, sprite.height - 1))
     clips = [("stand", [(sprite, 1000)], False, pivot)]
-    ej = os.path.join(a.dir, "expressions", "expressions.json")
-    if os.path.exists(ej):
-        with open(ej, encoding="utf-8") as f:
-            ex = json.load(f)
-        for n, e in ex.get("expressions", {}).items():
-            p = os.path.join(a.dir, "expressions", e["png"])
-            if os.path.exists(p):
-                clips.append((f"face_{n}", [(imaging.load_rgba(p), 1000)], False, pivot))
+    ex = expressions.load_current(a)
+    for n, e in ex.get("expressions", {}).items():
+        p = os.path.join(a.dir, "expressions", e["png"])
+        if os.path.exists(p):
+            clips.append((f"face_{n}", [(imaging.load_rgba(p), 1000)], False, pivot))
     used = {c[0] for c in clips}
     for aid in proj.asset_ids():
         b = proj.asset(aid)

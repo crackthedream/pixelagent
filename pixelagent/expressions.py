@@ -12,15 +12,19 @@ hair and eye findings are notes only ([expressions] fail_on).
 
 Outputs, in the character's folder: expressions/<name>.png (1x), <name>_x4.png, <name>_face.png (the face patch) and
 expressions.json (the face box, so a game can place the patch)."""
+import hashlib
 import json
 import os
 import re
+import shutil
+import tempfile
+import uuid
 
 import numpy as np
 from PIL import Image
 from pydantic import BaseModel, Field
 
-from . import imaging, prompts
+from . import cancel, imaging, prompts
 from .models import make_backend
 from .steps.build import _oklab, is_focal
 
@@ -277,6 +281,77 @@ def _score(check, fail_on=()):
 FAIL_ON = ("reads", "same_skin", "same_wear")
 
 
+def _source(asset):
+    """The exact selected inputs for a face set; paths detect restored versions, hashes detect edits in place."""
+    source = {"version": 1, "files": {}}
+    try:
+        for step, keys in (("concept", ("concept",)), ("pixelize", ("pixel_base", "geom")),
+                           ("export", ("png",))):
+            rec = asset.state.steps.get(step)
+            if not rec or rec.status != "done":
+                return None
+            for key in keys:
+                path = asset.output(step, key)
+                with open(path, "rb") as f:
+                    digest = hashlib.file_digest(f, "sha256").hexdigest()
+                source["files"][f"{step}.{key}"] = {
+                    "path": os.path.relpath(path, asset.dir).replace("\\", "/"), "sha256": digest}
+    except (OSError, KeyError, ValueError):
+        return None
+    return source
+
+
+def compatible(asset, metadata):
+    """Whether a saved set belongs to the character's current finished sources. Legacy sets stay on disk."""
+    if not isinstance(metadata, dict) or not metadata.get("source"):
+        return False
+    source = _source(asset)
+    return source is not None and metadata["source"] == source
+
+
+def _load(path):
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def load_current(asset):
+    """Metadata safe for the UI/game pack; missing, legacy or stale sets are hidden, never deleted."""
+    data = _load(os.path.join(asset.dir, "expressions", "expressions.json"))
+    return data if compatible(asset, data) else {}
+
+
+def _save(path, result):
+    """Readers see either the previous complete metadata or the next complete expression checkpoint."""
+    from .store import _retry_locked
+    fd, tmp = tempfile.mkstemp(prefix=".expressions-", suffix=".tmp", dir=os.path.dirname(path))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(result, f, indent=1)
+        _retry_locked(lambda: os.replace(tmp, path))
+    finally:
+        if os.path.exists(tmp):
+            os.remove(tmp)
+
+
+def _archive(out_dir):
+    """Keep the previous set and its drawings recoverable before starting a set for a different source."""
+    history = os.path.join(out_dir, "_history")
+    os.makedirs(history, exist_ok=True)
+    dst = tempfile.mkdtemp(prefix="set-", dir=history)
+    for name in os.listdir(out_dir):
+        if name == "_history":
+            continue
+        src = os.path.join(out_dir, name)
+        if os.path.isdir(src):
+            shutil.copytree(src, os.path.join(dst, name))
+        else:
+            shutil.copy2(src, os.path.join(dst, name))
+
+
 def passes(check, min_skin=0.5, fail_on=FAIL_ON):
     """Does a face pass its check? Only the findings in `fail_on` ([expressions] fail_on) and the measured share of
     skin kept can fail it. The hair and eye-colour findings are notes: they failed faces the owner rated highest
@@ -288,11 +363,17 @@ def passes(check, min_skin=0.5, fail_on=FAIL_ON):
 def make(proj, aid, names=None, log=print, mode=None, reuse=False, custom=None, relocate=False):
     """Draw expressions for the finished character `aid`: the presets `names` (default: all, or none when `custom` is
     given) and `custom`, a dict name -> the user's own description of the face. Returns expressions.json's dict.
-    The face is located once and its box kept: faces made later join the earlier ones. Locating it again moved the
+    The face is located once per source and its box kept: faces made later join the earlier ones. Locating it again moved the
     box by a pixel and dropped the six faces made before (2026-11-12). relocate: find the face again, which starts
     the set afresh.
     reuse: take the face box and the drawn images from an earlier run (no model calls: to redo the read-back)."""
     from .pixelart import sprite_from_pixel_art
+
+    def check_cancel():
+        if cancel.requested(proj.root, aid):
+            raise cancel.Cancelled("expressions cancelled")
+
+    check_cancel()
     a = proj.asset(aid)
     if proj.config.get("finish", {}).get("mode") != "native" or "pixelize" not in a.state.steps:
         raise ValueError("expressions are made for finished pixel-art characters (the Soft look)")
@@ -304,6 +385,9 @@ def make(proj, aid, names=None, log=print, mode=None, reuse=False, custom=None, 
         if n not in EXPRESSIONS:
             raise ValueError(f"unknown expression: {n}")
     todo = {**{n: EXPRESSIONS[n] for n in names}, **custom}
+    source = _source(a)
+    if source is None:
+        raise ValueError("finish the character before making expressions")
     concept = imaging.load_rgba(a.output("concept", "concept"))
     base = imaging.load_rgba(a.output("pixelize", "pixel_base"))
     final = imaging.load_rgba(a.output("export", "png"))
@@ -314,7 +398,6 @@ def make(proj, aid, names=None, log=print, mode=None, reuse=False, custom=None, 
     w, h = base.size
     if final.size != (w, h) or (lm["width"], lm["height"]) != (w, h):
         raise ValueError("the finished sprite does not line up with its readback: redo the character first")
-    backend = make_backend(proj, aid, mode)
     ecfg = proj.config.get("expressions", {})
     fail_on = tuple(ecfg.get("fail_on", FAIL_ON))
     unknown = [k for k in fail_on if k not in FINDINGS]
@@ -322,17 +405,37 @@ def make(proj, aid, names=None, log=print, mode=None, reuse=False, custom=None, 
         raise ValueError(f"[expressions] fail_on: unknown finding {', '.join(unknown)}")
     out_dir = os.path.join(a.dir, "expressions")
     path = os.path.join(out_dir, "expressions.json")
-    earlier = {}
-    if os.path.exists(path):
-        with open(path, encoding="utf-8") as f:
-            earlier = json.load(f)
+    earlier = _load(path)
+    same_source = earlier.get("source") == source
+    reuse_drawings = {}
+    if reuse:
+        if not same_source or not earlier.get("face_box") or relocate:
+            raise ValueError("the saved faces belong to another or unknown character version: draw them again")
+        for n in todo:
+            entry = earlier.get("expressions", {}).get(n)
+            if not entry:
+                raise ValueError(f"the saved expression '{n}' does not belong to this character version: draw it first")
+            attempt = int(entry.get("kept_attempt", 1))
+            legacy_dir = n if attempt == 1 else f"{n}_retry{attempt - 1}"
+            drawing = entry.get("drawing") or os.path.join("_generated", legacy_dir, "gen00.png")
+            reuse_drawings[n] = os.path.normpath(os.path.join(out_dir, drawing))
+            if not os.path.isfile(reuse_drawings[n]):
+                raise ValueError("a saved expression drawing is missing: draw the expression first")
+    if not same_source:
+        earlier = {}
+    check_cancel()
+    backend = None if reuse else make_backend(proj, aid, mode)
     seen = {k: earlier.get(k, "") for k in ("eye_colour", "wears")}
     if earlier.get("face_box") and (reuse or not relocate):
         box = tuple(earlier["face_box"])
         if not reuse and any(k not in earlier for k in seen):   # a set from before these were asked for
+            check_cancel()
             locate_face(backend, a.output("concept", "concept"), geom, (w, h), seen)
+            check_cancel()
     else:
+        check_cancel()
         box = locate_face(backend, a.output("concept", "concept"), geom, (w, h), seen)
+        check_cancel()
     if box is None and (mode or proj.config["backend"]["mode"]) == "dry_run":
         box = face_box(lm["labels"], w, h, final)          # test runs: the labels' estimate, else a guess
         if box is None and final.getbbox():
@@ -351,6 +454,9 @@ def make(proj, aid, names=None, log=print, mode=None, reuse=False, custom=None, 
     # the image model drew a second pair over them in another colour (the engineer, 2026-11-12).
     cbox = _concept_box(geom, box)
     os.makedirs(out_dir, exist_ok=True)
+    check_cancel()
+    if os.path.exists(path) and (not same_source or relocate):
+        _archive(out_dir)
     src = Image.new("RGBA", concept.size, (222, 222, 226, 255))
     src.alpha_composite(concept)
     src_path = os.path.join(out_dir, "_source.png")
@@ -363,12 +469,12 @@ def make(proj, aid, names=None, log=print, mode=None, reuse=False, custom=None, 
     to_final = colour_map(final, GRADES.get(str(proj.config.get("finish", {}).get("grade", "medium"))))
     face_size = f"{concept.width}x{concept.height}"     # passed with each call (never via the shared config)
     result = {"face_box": list(box), "size": [w, h], "eye_colour": seen["eye_colour"], "wears": seen.get("wears", ""),
-              "expressions": {}}
+              "source": source, "expressions": {}}
     eyes = prompts.EXPRESSION_EYES.format(colour=seen["eye_colour"]) if seen["eye_colour"] else ""
     if seen.get("wears"):
         eyes += prompts.EXPRESSION_WEARS.format(wears=seen["wears"])
-    if earlier.get("face_box") and tuple(earlier["face_box"]) == tuple(box):   # the same face: earlier ones still fit
-        result["expressions"] = earlier.get("expressions", {})
+    if not relocate and earlier.get("face_box") and tuple(earlier["face_box"]) == tuple(box):
+        result["expressions"] = dict(earlier.get("expressions", {}))
     pad = max(8, (cbox[2] - cbox[0]) // 6)                 # the judge sees the face with a little of its surroundings
     view = (max(0, cbox[0] - pad), max(0, cbox[1] - pad), min(concept.width, cbox[2] + pad),
             min(concept.height, cbox[3] + pad))
@@ -386,7 +492,7 @@ def make(proj, aid, names=None, log=print, mode=None, reuse=False, custom=None, 
         back = Image.new("RGBA", concept.size, (0, 0, 0, 0))     # the concept outside the face: the same grid
         back.alpha_composite(concept)
         back.paste(edited.crop(cbox), cbox[:2])
-        read, _ = sprite_from_pixel_art(back, int(geom["margin"]), grid=geom["grid"])
+        read, _ = sprite_from_pixel_art(back, geometry=geom)
         if read.size != (w, h):
             raise ValueError(f"the readback did not line up ({read.size} vs {(w, h)})")
         r = skin_fix(np.asarray(read.convert("RGBA")), base_a, editable)
@@ -399,40 +505,53 @@ def make(proj, aid, names=None, log=print, mode=None, reuse=False, custom=None, 
                 shown.crop(view))
 
     for n, text in todo.items():
+        check_cancel()
         log(f"[expressions] {n}")
-        gdir = os.path.join(out_dir, "_generated", n)
-        old = os.path.join(gdir, "gen00.png")
+        revision = uuid.uuid4().hex
+        gdir = os.path.join(out_dir, "_generated", n, revision)
         best, note = None, ""
         for k in range(1 if reuse else 1 + int(ecfg.get("retries", 1))):
-            if reuse and os.path.exists(old):
-                gen = old
+            check_cancel()
+            if reuse:
+                gen = reuse_drawings[n]
             else:
                 prompt = prompts.EXPRESSION.format(expression=text) + eyes + \
                     (prompts.EXPRESSION_RETRY.format(issue=note) if note else "")
+                check_cancel()
                 gen = backend.images.generate("image_final", prompt, 1, gdir if k == 0 else f"{gdir}_retry{k}",
                                               [src_path], None, mask=mask_path, size=face_size)[0]
+                check_cancel()
             sprite, changed, kept, drawn = read_back(gen)
-            check = {"skin_kept": round(kept, 3)}
+            check = dict(earlier["expressions"][n].get("check", {})) if reuse else {}
+            check["skin_kept"] = round(kept, 3)
             if not reuse and ecfg.get("judge", True):
+                check_cancel()
                 v = judge(backend, src.crop(view), drawn, text,
                           os.path.join(out_dir, "_generated", f"{n}_check{k}.png"))
+                check_cancel()
                 check.update(reads=v.reads, same_skin=v.same_skin, same_wear=v.same_wear, same_hair=v.same_hair,
                              eyes_in_style=v.eyes_in_style, issue=v.issue)
-            cand = {"sprite": sprite, "changed": changed, "check": check, "attempt": k + 1}
+            attempt = int(earlier["expressions"][n].get("kept_attempt", 1)) if reuse else k + 1
+            cand = {"sprite": sprite, "changed": changed, "check": check, "attempt": attempt, "drawing": gen}
             if best is None or _score(check, fail_on) >= _score(best["check"], fail_on):   # a tie: the one with the note
                 best = cand
             if passes(check, float(ecfg.get("min_skin_kept", 0.5)), fail_on):
                 break
             note = check.get("issue") or "the skin of the face changed colour: keep the skin exactly as it is"
             log(f"[expressions] {n}: {note}" + ("" if reuse else " (drawing it once more)" if k == 0 else ""))
+        check_cancel()
         sprite = best["sprite"]
         sprite.save(os.path.join(out_dir, f"{n}.png"))
         imaging.zoom(sprite, 4).save(os.path.join(out_dir, f"{n}_x4.png"))
         sprite.crop(box).save(os.path.join(out_dir, f"{n}_face.png"))
         result["expressions"][n] = {"png": f"{n}.png", "png_x4": f"{n}_x4.png", "face": f"{n}_face.png",
+                                    "revision": revision,
+                                    "drawing": os.path.relpath(best["drawing"], out_dir).replace("\\", "/"),
                                     "note": text, "pixels_changed": best["changed"], "custom": n in custom,
-                                    "check": best["check"], "attempts": k + 1, "kept_attempt": best["attempt"],
+                                    "check": best["check"], "attempts": (earlier["expressions"][n].get("attempts", 1)
+                                                                         if reuse else k + 1),
+                                    "kept_attempt": best["attempt"],
                                     "passed": passes(best["check"], float(ecfg.get("min_skin_kept", 0.5)), fail_on)}
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(result, f, indent=1)
+        _save(path, result)
+    check_cancel()
     return result

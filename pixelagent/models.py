@@ -47,6 +47,7 @@ class _Base:
         self.project = project
         self.asset_id = asset_id
         self.cfg = project.config
+        self._metering_state = {}
 
     def model_for(self, role):
         return self.cfg["models"].get(role, role)
@@ -56,6 +57,8 @@ class _Base:
                                "model": extra.pop("model", self.model_for(role)), "usd": usd, **extra})
 
     def check_budget(self):
+        from .metering import check_usage_guard
+        check_usage_guard(self._metering_state)
         problem = budget_problem(self.project, self.asset_id)
         if problem:
             raise BudgetExceeded(problem)
@@ -89,6 +92,7 @@ class Backend:
     def __init__(self, llm, images):
         self.llm = llm
         self.images = images
+        images._metering_state = llm._metering_state
 
 
 def make_backend(project, asset_id, mode=None, client=None):

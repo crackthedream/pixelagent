@@ -5,6 +5,9 @@ at 1x, pixel for pixel.
 Why: shrinking a painted concept (the reduce finish) gives soft gradients and a painted face shrunk down; hand-made
 sprites in the target style (Alice in Cradle) are built from deliberate clusters and pixel-designed faces
 (docs/FACE_ROOT_CAUSE.md section 7)."""
+import copy
+import math
+
 import numpy as np
 from PIL import Image
 
@@ -139,12 +142,57 @@ def cut_background(cells, tol=24):
     return ~bg
 
 
-def sprite_from_pixel_art(img, margin=2, grid=None, expected=None, period=None, snap=True):
+def _fixed_geometry(geometry, source_size):
+    """Validate the saved coordinate system before using it for a local edit."""
+    try:
+        if tuple(geometry["source_size"]) != tuple(source_size):
+            raise ValueError("the source image size changed")
+        grid = geometry["grid"]
+        xs, ys = grid["xs"], grid["ys"]
+        for edges, extent in zip((xs, ys), source_size):
+            if len(edges) < 2 or any(not math.isfinite(v) for v in edges) or \
+                    edges[0] < 0 or edges[-1] > extent or any(b <= a for a, b in zip(edges, edges[1:])):
+                raise ValueError("the saved block edges are invalid")
+        bx0, by0, bx1, by1 = geometry["crop"]
+        margin = geometry["margin"]
+        if any(isinstance(v, bool) or not isinstance(v, int) for v in (bx0, by0, bx1, by1, margin)) or \
+                margin < 0 or not (0 <= bx0 < bx1 < len(xs) and 0 <= by0 < by1 < len(ys)):
+            raise ValueError("the saved crop is invalid")
+        if list(geometry["size"]) != [bx1 - bx0 + 2 * margin, by1 - by0 + 2 * margin]:
+            raise ValueError("the saved canvas size does not match its crop")
+        return grid, (bx0, by0, bx1, by1), margin
+    except (KeyError, TypeError, ValueError, OverflowError) as e:
+        raise ValueError(f"cannot align the area edit with the original sprite: {e}") from e
+
+
+def source_box(geometry, box, source_size, pad=0):
+    """Map a sprite (x, y, width, height) to source pixels using the actual, possibly uneven block edges."""
+    grid, (cx, cy, _, _), margin = _fixed_geometry(geometry, source_size)
+    try:
+        x, y, w, h = box
+        if any(isinstance(v, bool) or not isinstance(v, int) for v in (x, y, w, h, pad)) or pad < 0 or \
+                not (0 <= x < x + w <= geometry["size"][0] and 0 <= y < y + h <= geometry["size"][1]):
+            raise ValueError("the selected area is outside the original canvas")
+        ix0, iy0, ix1, iy1 = x - margin + cx, y - margin + cy, x + w - margin + cx, y + h - margin + cy
+        xs, ys = grid["xs"], grid["ys"]
+        if not (0 <= ix0 < ix1 < len(xs) and 0 <= iy0 < iy1 < len(ys)):
+            raise ValueError("the selected area has no saved source blocks")
+        return (math.floor(xs[max(0, ix0 - pad)]), math.floor(ys[max(0, iy0 - pad)]),
+                math.ceil(xs[min(len(xs) - 1, ix1 + pad)]), math.ceil(ys[min(len(ys) - 1, iy1 + pad)]))
+    except (TypeError, ValueError) as e:
+        raise ValueError(f"cannot align the area edit with the original sprite: {e}") from e
+
+
+def sprite_from_pixel_art(img, margin=2, grid=None, expected=None, period=None, snap=True, geometry=None):
     """An image of a pixel-art sprite drawn as crisp blocks -> (the sprite at 1x as RGBA with `margin` transparent
-    pixels around it, geometry in the pipeline's convention: sprite pixel (X, Y) comes from the image area starting
-    at gx0 + (X - margin + crop_x) * s, gy0 + (Y - margin + crop_y) * s). `grid` reuses a known grid (an area
-    revision keeps the previous one)."""
+    pixels around it, geometry in the pipeline's convention). `grid` reuses measured block edges; `geometry`
+    also locks the original crop, canvas and origin for local edits, even if the silhouette changes."""
     img = img.convert("RGBA")
+    if geometry is not None:
+        fixed_grid, crop, margin = _fixed_geometry(geometry, img.size)
+        if grid is not None and grid != fixed_grid:
+            raise ValueError("cannot align the area edit: the grid differs from the original geometry")
+        grid = fixed_grid
     if img.getchannel("A").getextrema()[0] < 255:          # transparent background: put it on flat grey
         flat = Image.new("RGBA", img.size, (222, 222, 226, 255))
         flat.alpha_composite(img)
@@ -152,6 +200,19 @@ def sprite_from_pixel_art(img, margin=2, grid=None, expected=None, period=None, 
     grid = grid or find_grid(img, expected, period, snap)
     cells = read_blocks(img, grid)
     fig = cut_background(cells)
+    if geometry is not None:
+        # Read into the ORIGINAL canvas, including its margin. Recropping after an erased hat tip would move
+        # every unselected pixel. New pixels inside the original margin must also keep their original positions.
+        bx0, by0, bx1, by1 = crop
+        left, top = bx0 - margin, by0 - margin
+        x0, y0 = max(0, left), max(0, top)
+        x1, y1 = min(cells.shape[1], bx1 + margin), min(cells.shape[0], by1 + margin)
+        rgba = np.zeros((y1 - y0, x1 - x0, 4), np.uint8)
+        rgba[..., :3] = cells[y0:y1, x0:x1]
+        rgba[..., 3] = np.where(fig[y0:y1, x0:x1], 255, 0)
+        canvas = Image.new("RGBA", tuple(geometry["size"]), (0, 0, 0, 0))
+        canvas.paste(Image.fromarray(rgba, "RGBA"), (x0 - left, y0 - top))
+        return canvas, copy.deepcopy(geometry)
     ys, xs = np.nonzero(fig)
     if not len(ys):
         raise ValueError("no figure found in the pixel-art image")

@@ -1,11 +1,14 @@
 # PyInstaller spec for PixelAgent.exe: one windowed exe that serves the app UI and, started again with
 # --mcp-server, runs the bundled PixelLiner engine. Build with packaging/build.ps1.
 import os
+import runpy
 
 from PyInstaller.utils.hooks import collect_submodules
 
 ROOT = os.path.abspath(os.path.join(SPECPATH, ".."))
 ENGINE = os.path.abspath(os.path.expanduser(os.environ.get("PIXELLINER_ENGINE", "~/pixelliner-mcp")))
+runpy.run_path(os.path.join(SPECPATH, "verify_engine.py"))["verify_engine"](
+    ENGINE, os.path.join(SPECPATH, "engine-lock.json"))
 ENGINE_MODULES = ["server", "canvas", "art", "png", "gif", "project", "face_kit"]
 for m in ENGINE_MODULES:
     assert os.path.exists(os.path.join(ENGINE, m + ".py")), f"PixelLiner engine module {m}.py not found in {ENGINE}"
@@ -23,7 +26,10 @@ a = Analysis(
     datas=datas,
     # steps are imported by name and the engine is imported after a sys.path change: list them explicitly
     hiddenimports=collect_submodules("pixelagent") + ENGINE_MODULES + ["openai"],
-    excludes=["tkinter", "matplotlib", "pytest", "IPython", "notebook", "scipy", "pandas"],
+    # The SDK lazily exposes audio helpers, but this app has no audio feature. Do not redistribute
+    # optional PortAudio/ASIO libraries pulled in from a developer's installed sounddevice package.
+    excludes=["tkinter", "matplotlib", "pytest", "IPython", "notebook", "scipy", "pandas",
+              "sounddevice", "_sounddevice_data"],
     noarchive=False,
 )
 pyz = PYZ(a.pure)

@@ -232,7 +232,8 @@ class ArtistLoopTests(unittest.TestCase):
     def test_budget_stops_the_loop(self):
         script = [[call("view", {"mode": "image"}, "v")]]
         fake = NS(responses=FakeResponses(script))
-        self.proj.config["pricing"]["gpt-6.1-sol"] = {"input": 2000.0, "output": 2000.0}  # first call alone > $3
+        model = self.proj.config["models"]["artist"]
+        self.proj.config["pricing"][model].update({"input": 2000.0, "output": 2000.0})  # first call alone > $3
         s = run_artist(self.proj, "hero", self.ref, height=40, client=fake, max_usd=3, max_turns=10, log=lambda *_: None)
         self.assertIn("budget", s["stop"])
         self.assertEqual(s["turns"], 1)

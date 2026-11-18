@@ -1,0 +1,40 @@
+# Windows Python 3.13 build environment, captured 2026-11-18.
+# Includes the actual runtime packages from the PyInstaller table plus build dependencies.
+# Optional sounddevice/PortAudio audio helpers are excluded from this application.
+altgraph==0.17.5
+annotated-types==0.7.0
+anyio==4.13.0
+attrs==26.1.0
+brotli==1.2.0
+certifi==2026.2.25
+charset-normalizer==3.4.5
+click==8.3.1
+colorama==0.4.6
+distro==1.9.0
+h11==0.16.0
+httpcore==1.0.9
+httpx==0.28.1
+idna==3.11
+jiter==0.16.0
+markdown-it-py==4.0.0
+mdurl==0.1.2
+numpy==2.2.6
+openai==2.45.0
+packaging==26.1
+pefile==2024.8.26
+pillow==12.2.0
+pydantic==2.12.5
+pydantic-core==2.41.5
+pygments==2.20.0
+pyinstaller==6.22.3
+pyinstaller-hooks-contrib==2026.9
+python-dotenv==1.2.2
+pywin32-ctypes==0.2.3
+pyyaml==6.0.3
+rich==15.0.0
+setuptools==81.0.0
+sniffio==1.3.1
+tqdm==4.67.3
+typing-extensions==4.15.0
+typing-inspection==0.4.2
+tzdata==2025.3

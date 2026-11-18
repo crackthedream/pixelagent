@@ -13,22 +13,23 @@ timeout_s = 240
 max_retries = 4
 max_image_side = 1024        # images sent to models are downscaled to this (saves input tokens)
 
-# Model per role (OpenAI IDs as listed on developers.openai.com/api/docs/models, Nov 2026).
+# Model per role (https://developers.openai.com/api/docs/models/all, verified 2026-11-18).
+# These are defaults only: a project's explicit model selections still take precedence.
 [models]
-director = "gpt-6.1-sol"
+director = "gpt-6.2-sol"
 vision_pick = "gpt-6.1-terra"
 labeler = "gpt-6.1-terra"
-detail = "gpt-6.1-sol"
-repair = "gpt-6.1-sol"
-animator = "gpt-6.1-sol"
+detail = "gpt-6.2-sol"
+repair = "gpt-6.2-sol"
+animator = "gpt-6.2-sol"
 critic = "gpt-6.1-terra"
-final_critic = "gpt-6-astra"
+final_critic = "gpt-6.2-astra"
 utility = "gpt-6-luna"
-artist = "gpt-6.1-sol"           # draws the sprite itself through the pixelliner MCP tools
+artist = "gpt-6.2-sol"           # draws the sprite itself through the pixelliner MCP tools
 image_draft = "gpt-image-2.6-flare"
 image_final = "gpt-image-2.6-sunburst"
 
-# Reasoning effort per role (none | minimal | low | medium | high | xhigh | max).
+# Reasoning effort per role (model-dependent). GPT-6.2 does not support none or minimal; use low instead.
 [reasoning]
 director = "medium"
 detail = "medium"
@@ -78,21 +79,69 @@ proportion_retries = 1       # ... at most this many times, with a correction no
 clean_reference = "auto"     # "auto": redraw a reference into a clean full-body concept (images.edit) when it has
                              # scenery or a partial figure; true: always also redraw; false: never (convert as is)
 
-# USD per 1M tokens. Text models: from developers.openai.com/api/docs/models (Nov 2026).
-# Image models: no official prices were listed there; these are third-party figures -- VERIFY on your
-# billing page. costs.jsonl keeps the raw token counts, so costs can be recomputed later.
+# USD per 1M tokens at Standard pricing, verified 2026-11-18:
+# https://developers.openai.com/api/docs/pricing
+# https://developers.openai.com/api/docs/models/gpt-6.2-sol
+# https://developers.openai.com/api/docs/models/gpt-6.2-astra
+# For the GPT-6 models listed below, more than 272K input tokens applies these multipliers to the WHOLE request.
+# The input multiplier also applies to cached reads and writes. Write prices are total rates, not surcharges.
+# https://developers.openai.com/api/docs/guides/prompt-caching
+# Raw usage stays in costs.jsonl. Older model rates remain available for explicit project overrides.
+[pricing."gpt-6.2-sol"]
+input = 2.0
+cached_input = 0.10
+cache_write_30m = 2.50
+cache_write_12h = 5.0
+output = 10.0
+long_context_threshold = 272000
+long_input_multiplier = 2.0
+long_output_multiplier = 1.5
+[pricing."gpt-6.2-astra"]
+input = 8.0
+cached_input = 0.40
+cache_write_30m = 10.0
+cache_write_12h = 20.0
+output = 40.0
+long_context_threshold = 272000
+long_input_multiplier = 2.0
+long_output_multiplier = 1.5
 [pricing."gpt-6-astra"]
 input = 10.0
+cached_input = 1.0
+cache_write_30m = 12.5
+cache_write_12h = 25.0
 output = 50.0
+long_context_threshold = 272000
+long_input_multiplier = 2.0
+long_output_multiplier = 1.5
 [pricing."gpt-6.1-sol"]
 input = 2.0
+cached_input = 0.10
+cache_write_30m = 2.5
+cache_write_12h = 5.0
 output = 10.0
+long_context_threshold = 272000
+long_input_multiplier = 2.0
+long_output_multiplier = 1.5
 [pricing."gpt-6.1-terra"]
 input = 1.0
+cached_input = 0.05
+cache_write_30m = 1.25
+cache_write_12h = 2.5
 output = 5.0
+long_context_threshold = 272000
+long_input_multiplier = 2.0
+long_output_multiplier = 1.5
 [pricing."gpt-6-luna"]
 input = 0.10
+cached_input = 0.01
+cache_write_30m = 0.125
+cache_write_12h = 0.25
 output = 0.50
+long_context_threshold = 272000
+long_input_multiplier = 2.0
+long_output_multiplier = 1.5
+# Image rates below are also published on the official pricing page linked above.
 [pricing."gpt-image-2.6-flare"]
 text_input = 5.0
 image_input = 8.0
@@ -156,7 +205,8 @@ min_gain = 0.25              # a repair round is kept only if quality rises by m
 fidelity_weight = 15.0       # quality = critic overall + lint/50 - fidelity_weight * concept distance
 
 [budget]
-# Hard caps. Pro $100 tier = $100 API credit per billing month; leave headroom.
+# Stop new paid requests when recorded usage reaches these limits; already in-flight calls can exceed them.
+# Prices and account credits must be checked separately; these settings do not guarantee a provider billing cap.
 monthly_usd = 90.0
 concept_drafts = 4
 grid_candidates = 6

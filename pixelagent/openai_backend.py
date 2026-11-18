@@ -12,6 +12,8 @@ import time
 from PIL import Image
 
 from .models import _Base
+from .metering import (is_gpt62, price_profile, record_usage, request_error,
+                       response_settings, usage_price)
 
 
 def find_api_key():
@@ -63,37 +65,43 @@ class OpenAILLM(_Base):
         self.client = client or make_client(self.cfg)
 
     def _price(self, model, usage):
-        p = self.cfg.get("pricing", {}).get(model)
-        if not p or usage is None:
-            return 0.0
-        return (usage.input_tokens * p.get("input", 0) + usage.output_tokens * p.get("output", 0)) / 1e6
+        return usage_price(price_profile(self.cfg, model, "llm"), usage, "llm")
 
     def structured(self, role, instructions, text, images, schema, stub):
         self.check_budget()
         model = self.model_for(role)
+        pricing = price_profile(self.cfg, model, "llm")
         content = [{"type": "input_text", "text": text or "(no text input)"}]
         max_side = int(self.cfg["backend"].get("max_image_side", 1024))
         for p in images or []:
             content.append({"type": "input_image", "image_url": image_data_url(p, max_side), "detail": "high"})
-        kwargs = dict(model=model, instructions=instructions, input=[{"role": "user", "content": content}],
-                      text_format=schema)
+        items = [{"role": "user", "content": content}]
+        kwargs = dict(model=model, input=items, text_format=schema)
+        if is_gpt62(model):
+            # Stable reusable instructions lead the input; 6.2 appends top-level instructions after it.
+            items.insert(0, {"role": "developer", "content": instructions})
+        else:
+            kwargs["instructions"] = instructions
         effort = self.cfg.get("reasoning", {}).get(role)
-        if effort:
-            kwargs["reasoning"] = {"effort": effort}
+        kwargs.update(response_settings(model, effort))
         t = time.perf_counter()
         try:
             resp = self.client.responses.parse(**kwargs)
         except Exception as e:  # some models reject reasoning settings: retry once without them
-            if "reasoning" in kwargs and "reasoning" in str(e).lower():
+            if not is_gpt62(model) and "reasoning" in kwargs and "reasoning" in str(e).lower():
                 kwargs.pop("reasoning")
-                resp = self.client.responses.parse(**kwargs)
+                try:
+                    resp = self.client.responses.parse(**kwargs)
+                except Exception as retry_error:
+                    self._log("llm", role, model=model, error=type(retry_error).__name__, ms=int((time.perf_counter() - t) * 1000))
+                    raise request_error(retry_error) from None
             else:
                 self._log("llm", role, model=model, error=type(e).__name__, ms=int((time.perf_counter() - t) * 1000))
-                raise
+                raise request_error(e) from None
         usage = getattr(resp, "usage", None)
-        self._log("llm", role, usd=round(self._price(model, usage), 5), model=model, images=len(images or []),
-                  input_tokens=getattr(usage, "input_tokens", None), output_tokens=getattr(usage, "output_tokens", None),
-                  ms=int((time.perf_counter() - t) * 1000))
+        record_usage(self.project, self.asset_id, model, "llm", role, usage, pricing, images=len(images or []),
+                     guard=self._metering_state, service_tier=getattr(resp, "service_tier", None),
+                     ms=int((time.perf_counter() - t) * 1000))
         result = resp.output_parsed
         if result is None:
             raise RuntimeError(f"{model} returned no parsable {schema.__name__} (refusal or empty output)")
@@ -106,16 +114,7 @@ class OpenAIImages(_Base):
         self.client = client or make_client(self.cfg)
 
     def _price(self, model, usage, n):
-        p = self.cfg.get("pricing", {}).get(model)
-        if not p or usage is None:
-            return 0.0
-        det = getattr(usage, "input_tokens_details", None)
-        img_in = (getattr(det, "image_tokens", 0) or 0) if det is not None else 0
-        txt_in = getattr(det, "text_tokens", None) if det is not None else None
-        if txt_in is None:
-            txt_in = usage.input_tokens - img_in
-        return (txt_in * p.get("text_input", 0) + img_in * p.get("image_input", 0)
-                + usage.output_tokens * p.get("output", 0)) / 1e6
+        return usage_price(price_profile(self.cfg, model, "image"), usage, "image")
 
     def generate(self, role, prompt, n, out_dir, refs=None, stub=None, quality=None, mask=None, size=None):
         """Generate n images (refs given -> images.edit with the references; mask: a PNG whose transparent area is
@@ -123,8 +122,9 @@ class OpenAIImages(_Base):
         need their own size pass it here instead of changing [images] draft_size, which every run of the project
         shares: faces drawn while pose sheets were drawn came back at the sheets' size (2026-11-12)."""
         self.check_budget()
-        os.makedirs(out_dir, exist_ok=True)
         model = self.model_for(role)
+        pricing = price_profile(self.cfg, model, "image")
+        os.makedirs(out_dir, exist_ok=True)
         icfg = self.cfg.get("images", {})
         q = quality or (icfg.get("final_quality") if role == "image_final" else icfg.get("draft_quality"))
         common = dict(model=model, prompt=prompt, n=n, size=size or icfg.get("draft_size", "1024x1536"), quality=q,
@@ -148,10 +148,16 @@ class OpenAIImages(_Base):
                 resp = self.client.images.generate(**common)
         except Exception as e:
             self._log("image", role, model=model, n=n, error=type(e).__name__, ms=int((time.perf_counter() - t) * 1000))
-            raise
+            raise request_error(e) from None
         finally:
             for f in files:
                 f.close()
+        # The provider has completed a billable request. Record it before decoding or saving outputs:
+        # corrupt/empty output and a full or locked destination do not undo the provider's charge.
+        usage = getattr(resp, "usage", None)
+        record_usage(self.project, self.asset_id, model, "image", role, usage, pricing,
+                     guard=self._metering_state, n=len(resp.data or []), requested_n=n, quality=q,
+                     ms=int((time.perf_counter() - t) * 1000))
         paths = []
         for i, d in enumerate(resp.data or []):
             if not d.b64_json:
@@ -160,10 +166,6 @@ class OpenAIImages(_Base):
             with open(p, "wb") as f:
                 f.write(base64.b64decode(d.b64_json))
             paths.append(p)
-        usage = getattr(resp, "usage", None)
-        self._log("image", role, usd=round(self._price(model, usage, n), 5), model=model, n=len(paths), quality=q,
-                  input_tokens=getattr(usage, "input_tokens", None), output_tokens=getattr(usage, "output_tokens", None),
-                  ms=int((time.perf_counter() - t) * 1000))
         if not paths:
             raise RuntimeError(f"{model} returned no images")
         return paths

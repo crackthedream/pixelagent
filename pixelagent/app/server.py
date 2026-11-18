@@ -86,7 +86,7 @@ def stage_status(statuses):
 
 def default_settings():
     return {"projects_dir": os.path.join(os.path.expanduser("~"), "Documents", "PixelAgent"),
-            "backend": "openai", "monthly_usd": 90.0, "asset_usd": 3.0, "sprite_height": 160, "look": "soft",
+            "backend": "dry_run", "monthly_usd": 90.0, "asset_usd": 3.0, "sprite_height": 160, "look": "soft",
             "current_project": None}
 
 
@@ -202,11 +202,14 @@ class Jobs:
             t = self.running.get(key)
             return bool(t and t.is_alive())
 
-    def start(self, key, fn):
+    def start(self, key, fn, *, cancel_root=None):
         with self.lock:
             t = self.running.get(key)
             if t and t.is_alive():
                 raise ValueError("this item is already working")
+            from .. import cancel
+            if cancel_root is not None:
+                cancel.clear(cancel_root, key[1])
             self.logs[key] = []
             self.errors.pop(key, None)
 
@@ -220,6 +223,9 @@ class Jobs:
                     self.errors[key] = f"{type(e).__name__}: {e}"
                     self._log(key, "error: " + self.errors[key])
                     traceback.print_exc()
+                finally:
+                    if cancel_root is not None:
+                        cancel.clear(cancel_root, key[1])
             t = threading.Thread(target=run, daemon=True)
             self.running[key] = t
             t.start()
@@ -442,11 +448,16 @@ def asset_detail(settings, pid, proj, aid):
         d["animations"] = [x for x in proj.asset_ids() if x != aid and proj.asset(x).state.inputs.get("character") == aid]
         ej = os.path.join(a.dir, "expressions", "expressions.json")
         if os.path.exists(ej):
-            with open(ej, encoding="utf-8") as f:
-                ex = json.load(f)
-            d["expressions"] = [{"name": n, "url": file_url(pid, a, "expressions/" + e["png"]),
-                                 "x4": file_url(pid, a, "expressions/" + e["png_x4"]),
-                                 "face": file_url(pid, a, "expressions/" + e["face"]),
+            from ..expressions import load_current
+            ex = load_current(a)
+            d["expressions_stale"] = not bool(ex)
+            def expression_url(e, key):
+                rel = "expressions/" + e[key]
+                revision = e.get("revision") or str(os.stat(a.path(rel)).st_mtime_ns)
+                return file_url(pid, a, rel) + "&v=" + quote(str(revision), safe="")
+            d["expressions"] = [{"name": n, "url": expression_url(e, "png"),
+                                 "x4": expression_url(e, "png_x4"),
+                                 "face": expression_url(e, "face"),
                                  "note": e.get("note", ""), "custom": bool(e.get("custom")),
                                  "passed": e.get("passed", True), "issue": (e.get("check") or {}).get("issue", "")}
                                 for n, e in ex.get("expressions", {}).items()]
@@ -486,15 +497,7 @@ def start_run(settings, pid, aid, check=True, **kw):
         spend_check(settings, pid, aid)
     proj = Project(project_path(settings, pid), overrides(settings))
     proj.asset(aid)  # a valid id of an existing item, checked before anything starts
-    from .. import cancel
-    cancel.clear(proj.root, aid)  # a cancel belongs to the run it was made for, never to a later one
-
-    def job(log):
-        try:
-            Pipeline(proj, aid).run(log=log, **kw)
-        finally:
-            cancel.clear(proj.root, aid)
-    JOBS.start((pid, aid), job)
+    JOBS.start((pid, aid), lambda log: Pipeline(proj, aid).run(log=log, **kw), cancel_root=proj.root)
 
 
 def safe_id(name):
@@ -568,6 +571,7 @@ def game_pack(settings, body):
     pid, aid = body["project"], body["id"]
     proj = Project(project_path(settings, pid), overrides(settings))
     a = proj.asset(aid)
+    _not_running(pid, [aid])
     if a.state.inputs.get("kind") in ("animation", "scene", "kit") or a.state.inputs.get("asset_type") == "prop":
         raise ValueError("a game pack is made for a character (it includes its animations)")
     _, zpath, summary = gamepack.build(proj, aid)
@@ -602,7 +606,8 @@ def make_expressions(settings, body):
         raise ValueError("expressions are made for a finished character")
     if proj.config.get("finish", {}).get("mode") != "native":
         raise ValueError("expressions need the Soft look (pixel-art characters)")
-    JOBS.start((pid, aid), lambda log: expressions.make(proj, aid, names, log=log, custom=custom))
+    JOBS.start((pid, aid), lambda log: expressions.make(proj, aid, names, log=log, custom=custom),
+               cancel_root=proj.root)
     return {"ok": True, "names": names + list(custom)}
 
 
@@ -793,6 +798,7 @@ def duplicate_item(settings, body):
     shutil.copytree(a.dir, os.path.join(proj.root, "assets", new), ignore=shutil.ignore_patterns("live", "*.tmp"))
     b = proj.asset(new)
     b.state.id = new
+    b.reset_cost_identity()
     _set_name(b, f"{label} copy")
     b.save()
     return {"id": new}
@@ -851,6 +857,9 @@ def delete_project(settings, body):
         raise ValueError("no such project")
     if _project_busy(pid):
         raise ValueError("wait until everything in this project has finished working")
+    # Upgrade old per-project accounting before its logs leave the searchable project root.
+    from ..store import ledger_month_spend
+    ledger_month_spend(ledger_path(), settings["projects_dir"])
     proj = Project(path)
     ids = proj.asset_ids()
     thumb = None

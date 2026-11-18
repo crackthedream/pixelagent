@@ -134,6 +134,9 @@ class StepRecord(BaseModel):
 
 class AssetState(BaseModel):
     id: str
+    # Display/folder IDs can be reused or renamed; accounting follows this identity instead.
+    asset_uuid: str = ""
+    legacy_costs: dict[str, float] = Field(default_factory=dict)
     inputs: dict = Field(default_factory=dict)
     steps: dict[str, StepRecord] = Field(default_factory=dict)
     gates: dict[str, GateDecision] = Field(default_factory=dict)

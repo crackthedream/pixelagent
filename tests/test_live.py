@@ -71,7 +71,8 @@ class LivePreviewTest(unittest.TestCase):
 
         class Resp:
             def __init__(self, calls):
-                self.id, self.output, self.usage = "r", calls, None
+                self.id, self.output = "r", calls
+                self.usage = {"input_tokens": 10, "output_tokens": 3}
 
         script = [[Call("view", {"mode": "image"}, "a")],
                   [Call("draw", {"ops": [{"op": "pixel", "x": 0, "y": 0, "color": "#FFFFFF"}]}, "b")],
@@ -86,7 +87,7 @@ class LivePreviewTest(unittest.TestCase):
         self.mcp.call("new_canvas", {"width": 4, "height": 4, "name": "s"})
         project = Project(os.path.join(self.tmp, "proj"))
         rounds = []
-        sess = AgentSession(project, "s", self.mcp, Client, "gpt-test", self.tmp, allowed=("view", "draw"),
+        sess = AgentSession(project, "s", self.mcp, Client, project.config["models"]["artist"], self.tmp, allowed=("view", "draw"),
                             log=lambda m: None, on_round=lambda se, ph: rounds.append((ph, se.turns)))
         stop, summary = sess.converse("draw", "test", [{"type": "input_text", "text": "go"}], 5)
         sess.close()

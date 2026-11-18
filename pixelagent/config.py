@@ -27,6 +27,7 @@ def _merge(base, over):
 
 
 def load_config(project_dir=None, overrides=None):
+    """Merge defaults, project choices, then runtime overrides; never rewrite an explicitly selected model."""
     with open(DEFAULT_CONFIG, "rb") as f:
         cfg = tomllib.load(f)
     if project_dir:

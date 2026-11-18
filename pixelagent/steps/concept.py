@@ -53,15 +53,21 @@ def _revise(ctx, fix):
     src = ctx.path("revise_source.png")
     canvas.convert("RGB").save(src)
     mask, cbox = None, None
+    if native and fix.get("box") and not fix.get("geom"):
+        raise ValueError("cannot align the area edit: the original sprite geometry is missing")
     if fix.get("box") and fix.get("geom"):
         g = fix["geom"]
-        x, y, w, h = fix["box"]
-        m, s = g["margin"], g["s"]
-        X0 = g["gx0"] + (x - 1 - m + g["crop"][0]) * s
-        Y0 = g["gy0"] + (y - 1 - m + g["crop"][1]) * s
-        X1 = g["gx0"] + (x + w + 1 - m + g["crop"][0]) * s
-        Y1 = g["gy0"] + (y + h + 1 - m + g["crop"][1]) * s
-        cbox = (max(0, int(X0)), max(0, int(Y0)), min(bw, int(X1 + 1)), min(bh, int(Y1 + 1)))
+        if native:
+            from ..pixelart import source_box
+            cbox = source_box(g, fix["box"], base.size, pad=1)
+        else:
+            x, y, w, h = fix["box"]
+            m, s = g["margin"], g["s"]
+            X0 = g["gx0"] + (x - 1 - m + g["crop"][0]) * s
+            Y0 = g["gy0"] + (y - 1 - m + g["crop"][1]) * s
+            X1 = g["gx0"] + (x + w + 1 - m + g["crop"][0]) * s
+            Y1 = g["gy0"] + (y + h + 1 - m + g["crop"][1]) * s
+            cbox = (max(0, int(X0)), max(0, int(Y0)), min(bw, int(X1 + 1)), min(bh, int(Y1 + 1)))
         mk = Image.new("RGBA", (W, H), (255, 255, 255, 255))
         hole = Image.new("RGBA", (round((cbox[2] - cbox[0]) * k), round((cbox[3] - cbox[1]) * k)), (0, 0, 0, 0))
         mk.paste(hole, (ox + round(cbox[0] * k), oy + round(cbox[1] * k)))
@@ -73,10 +79,12 @@ def _revise(ctx, fix):
         f.write(prompt)
     out = ctx.backend.images.generate("image_final", prompt, 1, ctx.path("generated"), [src],
                                       lambda n, d: [shutil.copyfile(src, f"{d}/gen00.png") or f"{d}/gen00.png"],
-                                      mask=mask)
+                                      mask=mask, size=f"{W}x{H}")
     edited = imaging.load_rgba(out[0])
     if edited.size != (W, H):
-        edited = edited.resize((W, H), Image.NEAREST if native else Image.LANCZOS)
+        if native:
+            raise ValueError("cannot align the area edit: the edited image size differs from the original")
+        edited = edited.resize((W, H), Image.LANCZOS)
     if cbox:
         back = edited.crop((ox, oy, ox + sw, oy + sh)).resize((bw, bh), Image.NEAREST if native else Image.LANCZOS)
         if not native:   # a pixel-art concept keeps its flat background (pixelize cuts it away)

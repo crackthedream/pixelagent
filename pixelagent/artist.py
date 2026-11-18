@@ -12,7 +12,7 @@ import time
 
 from . import imaging
 from .config import load_engine
-from .agent_session import DEFAULT_TOOLS as ALLOWED_TOOLS, AgentSession
+from .agent_session import DEFAULT_TOOLS as ALLOWED_TOOLS, AgentSession, interrupted
 from .mcp_client import MCPClient
 
 
@@ -336,7 +336,7 @@ def run_artist(project, asset_id, reference, height=64, client=None, model=None,
                      img(ref_path)] + [img(p) for p in sess.save_imgs(view_imgs, "view")]
             stops["draw"], finishes["draw"] = sess.converse("draw", instructions, first, max_turns)
 
-        if "face" in phases and face and sess.spent < max_usd:
+        if "face" in phases and face and not any(interrupted(reason) for reason in stops.values()):
             fx, fy, fw, fh = face
             pad = 3
             vx, vy = max(0, fx - pad), max(0, fy - pad)
@@ -359,7 +359,7 @@ def run_artist(project, asset_id, reference, height=64, client=None, model=None,
             # the whole drawing conversation along re-sent ~30 rounds of images per call ($0.51 vs ~$0.05-0.08)
             stops["face"], finishes["face"] = sess.converse("face", instructions, content, face_turns, fresh=True)
 
-        if "revise" in phases and revise:
+        if "revise" in phases and revise and not any(interrupted(reason) for reason in stops.values()):
             box = revise.get("box")
             if box:
                 bx, by, bw, bh = box

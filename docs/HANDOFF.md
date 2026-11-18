@@ -1,10 +1,13 @@
 # PixelAgent: development status and remaining work
 
+For the November 18 Windows public preview, see the [release overview](../README.md) and [verification](WINDOWS_VERIFICATION_2026-11-18.md).
+
+
 A handoff document for an AI developer (GPT) continuing this project. It describes what exists, how it works,
 what has been measured, which decisions the owner has made, and what is left to build, in priority order.
-Status as of 2026-11-12 (scope narrowed to characters and their expressions; animations, scenes and kits are
+Status updated 2026-11-17 (reliability repairs: `docs/REPAIRS_2026-11-17.md`; scope narrowed to characters and their expressions; animations, scenes and kits are
 switched off; the native pixel-art finish, palette grade, move sets, expressions and game packs: section 13; earlier status from 2026-11-09 below where not superseded; see `git log` of `crackthedream/pixelagent`
-and `7801b3e` of `crackthedream/pixelliner-mcp`, both private GitHub repositories).
+and `0c24db40e84d797fb2418444ecb96184fb53231b` of `crackthedream/pixelliner-mcp`, separate GitHub repositories; the engine source is private).
 
 ---
 
@@ -28,7 +31,8 @@ These come from the owner and from incidents during development. Treat them as r
 4. **Fix root causes, not examples.** When a test character looks wrong, find the mechanism that fails for a
    whole class of inputs, fix that, and measure it on all benchmark characters (see section 7). Do not tune for
    one sample.
-5. **Money.** The owner has ChatGPT Pro at $100/month, which includes $100 of API credit. Caps: `$3` per asset,
+5. **Money.** Account credit entitlement must be verified in the owner's actual account; do not infer it from a
+   ChatGPT subscription name. Configured spending thresholds (already in-flight calls may exceed them): `$3` per asset,
    `$90` per month (`config.toml [budget]`), `$1.5` for the artist step, `$4` for drawing one animation. Use
    the dry-run backend (no API calls, zero cost) for every plumbing test. Ask the owner before any real run
    that is not part of what they asked for.
@@ -43,7 +47,7 @@ These come from the owner and from incidents during development. Treat them as r
    this: with FOF_ALLOWUNDO it silently deletes permanently when recycling is unavailable; review finding F01.)
 10. **Downloads/installs** (packages, tools) need the owner's permission first: say the name, the source and the size.
 11. **Environment quirks:** Windows 11, Python 3.13 at `D:\python\Python313`. The user folder contains non-ASCII
-    characters (`C:\Users\孙炜`), so always open files with `encoding="utf-8"` and pass paths as arguments. Git
+    characters (`%USERPROFILE%`), so always open files with `encoding="utf-8"` and pass paths as arguments. Git
     Bash heredocs can mangle `\\n` escapes, so write scripts to files instead. `pytest` is not installed; tests use
     `unittest`.
 
@@ -113,7 +117,7 @@ An MCP server over stdio (newline-delimited JSON-RPC 2.0, protocol `2025-06-18`)
 
 ## 5. The pipeline: `pixelagent`
 
-### 5.1 Character pipeline (14 steps, `pixelagent/steps/__init__.py`)
+### 5.1 Classic character pipeline (14 steps, `pixelagent/steps/__init__.py`)
 
 | # | Step | Kind | What it does |
 |---|---|---|---|
@@ -156,11 +160,15 @@ An MCP server over stdio (newline-delimited JSON-RPC 2.0, protocol `2025-06-18`)
 
 | Role | Model | Notes |
 |---|---|---|
-| director, detail, repair, animator, **artist** | `gpt-6.1-sol` | $2 in / $10 out |
+| director, detail, repair, animator, **artist** | `gpt-6.2-sol` | $2 in / $10 out |
 | vision_pick, labeler, critic | `gpt-6.1-terra` | $1 / $5 |
-| final_critic | `gpt-6-astra` | $10 / $50 |
+| final_critic (pairwise comparisons) | `gpt-6.2-astra` | $8 / $40 |
 | utility | `gpt-6-luna` | $0.10 / $0.50 |
-| image_draft / image_final | `gpt-image-2.6-flare` / `gpt-image-2.6-sunburst` | prices are third-party figures, **unverified** |
+| image_draft / image_final | `gpt-image-2.6-flare` / `gpt-image-2.6-sunburst` | $5 text input, $8 image input, $30 image output |
+
+The November 18 Windows build starts new installations in Test run. Saved settings and explicit project model
+assignments take precedence. Model IDs and Standard pricing are maintained together in `config.toml`.
+See [OpenAI pricing](https://developers.openai.com/api/docs/pricing) and the [Windows quick start](../packaging/WINDOWS-QUICKSTART.txt).
 
 API usage: Responses API with structured outputs (`responses.parse` + pydantic, strict schemas) and tool loops
 (`responses.create` with function tools and `previous_response_id`); Images API generate/edit.
@@ -603,7 +611,10 @@ no such labels it keeps a face-sized box (18% of the figure's height) from the t
 Still open from this baseline: owner ratings of the ten sprites (not done), a second sample per reference to
 measure run-to-run variation, and a rerun with the cleanup and face-box fixes in place (about $6.50).
 
-## 11b. Review of `de5e3a2` (Codex, 2026-11-09): all 11 findings fixed
+## 11b. Historical review fixes for `de5e3a2`
+
+The table records the first repair pass. The 2026-11-17 follow-up found remaining F05/F06 boundary cases
+and seven further issues; current fixes and regression evidence are in `docs/REPAIRS_2026-11-17.md`.
 
 | ID | Finding | Fix | Regression test |
 |---|---|---|---|
@@ -620,7 +631,8 @@ measure run-to-run variation, and a rerun with the cleanup and face-box fixes in
 | F11 | Play-once animations looped in preview/4x GIFs | One rule for all GIFs; play once = no NETSCAPE block (engine `gif.py`) | `test_animation` (stop test checks all GIFs) |
 
 Also from the review: the unused `openai-agents` dependency was removed. Not done yet (release items, owner's call):
-license, dependency lock and pinned engine revision in the build, CI, clean-machine test.
+license, CI and clean-machine test. On 2026-11-17 the tested dependency environment was locked and bundled
+engine files were pinned with verified hashes; see the repair note.
 
 ## 12. Known issues and limits
 
@@ -695,8 +707,9 @@ motion comes from pairs of faces (neutral and blink, neutral and an open mouth).
 
 **Character generation is done when**, on a fixed set of the ten references plus five text prompts (a character
 and three expressions each): the owner's average rating is at least 4 with nothing below 3, a second run of the set
-rates alike, and the results need no manual fixes. **Met on 2026-11-13** for everything rated: both runs are
-above the bar and the second rates at or above the first. Six references have characters rated but no faces.
+rates alike, and the results need no manual fixes. **The rated subset passed on 2026-11-13.** The complete acceptance set is still incomplete: six references
+have no rated expressions, and the repeated set contains nine characters with eight sprites rated.
+Do not describe this as completion of the full 15-character criterion.
 
 ### Done on 2026-11-12 (numbers: `docs/FACE_ROOT_CAUSE.md`, "Validation round")
 - Two validation rounds on four characters each (`bench_runs_validate`, $2.97; `bench_runs_validate2` on the
@@ -713,8 +726,8 @@ above the bar and the second rates at or above the first. Six references have ch
 - `benchmarks/validation_round.py`: a resumable rating round and its rating sheet.
 
 ### Next: characters
-1. **Character generation meets its bar** (2026-11-13). The second run, nine characters made again from scratch
-   and 27 faces, is rated 5 throughout (`bench_runs_validate4`, $2.92), so the results repeat. Not covered: faces
+1. **The rated subset meets its bar; complete the missing acceptance cases** (2026-11-13). The second run, nine characters made again from scratch
+   and 27 faces, has eight rated sprites and 27 rated faces at 5 (`bench_runs_validate4`, $2.92), so the results repeat. Not covered: faces
    for six of the ten references (ref02, ref04-ref07, ref09). The first run: characters from text prompts
    5.0 (4 rated, 2026-11-13) and from references 4.8 (ten, 2026-11-10); faces 4.32 on four references and 4.92 on
    four text-prompt characters, 4.51 over all 37 with a lowest of 3 (`benchmarks/validation_ratings.csv`). Six of
@@ -724,7 +737,8 @@ above the bar and the second rates at or above the first. Six references have ch
 1c. Done 2026-11-12: the automatic face check is calibrated to the owner. Hair and eye colour are notes only; a
    redraw happens when the face does not read or the skin changed (`[expressions] fail_on`). Expected: a face back
    from about $0.10 to $0.06; confirm on the next paid round.
-1a. **Text-only characters** have no owner ratings yet (all ten rated characters came from reference images).
+1a. **Text-only characters** now have owner ratings in validate3/validate4; retain the unrated sprite gaps
+and six missing reference-expression sets as explicit outstanding acceptance coverage.
 1b. **A standing base sprite** for a seated or lying reference, or a question to the user, before animating.
 2. **Steering single pieces:** redo one animation frame or one expression with a note (the frames are separate
    PNGs; expressions already redo by name).
@@ -735,7 +749,11 @@ above the bar and the second rates at or above the first. Six references have ch
 5. **Accurate costs:** price cached input at its discounted rate (`config.toml [pricing]`).
 6. **Concept versions** in the Versions card (the concept step's outputs are on disk under `vNNN/`).
 
-### Later: objects and backgrounds, as their own workflows
+### Historical objects and backgrounds roadmap
+
+The paragraphs below preserve earlier experiments. The 2026-11-12 scope above takes precedence: objects are
+frozen; backgrounds and animations are off; LDtk projects and a level composer are dropped. These are not
+the next implementation tasks. Historical output locations are mapped in `docs/CLEANUP_2026-11-17.md`.
 The owner's direction (2026-11-09): **characters are the primary focus.** Objects and backgrounds must be supported
 too, mainly generated from prompts, and their logic differs from characters, so each gets its own workflow instead
 of options on the character pipeline. Each is a separate asset kind (like animations), with its own steps, gates,
@@ -812,3 +830,12 @@ app sheet ("New object", "New background") and benchmark.
 - **Sel-out:** an outline coloured per neighbouring material instead of one dark line.
 - **Dry run / Test run:** stub models with no API calls and no cost. It tests plumbing, not quality.
 - **Paused:** a run stopped between steps. Continue resumes where it stopped.
+
+## 14 Reliability repair handoff on 2026-11-17
+
+Continue from `docs/REPAIRS_2026-11-17.md` for the nine follow-up findings and current validation. The owner
+authorized permanent deletion of obsolete development outputs; `docs/CLEANUP_2026-11-17.md` records the completed
+deletion set. Original reference inputs, synthetic test fixtures, rating CSVs, current validation runs, the current
+executable and `bench_runs_160` (the face-lab default input) are retained. The app's normal Recently Deleted
+behavior is unchanged. Source edits are uncommitted until the owner requests a commit or push. No paid model
+evaluation was part of these repairs.

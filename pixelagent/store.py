@@ -16,6 +16,7 @@ import re
 import shutil
 import threading
 import time
+import uuid
 
 from .config import load_config
 from .schemas import AssetState, StepRecord
@@ -39,6 +40,54 @@ def _retry_locked(fn, tries=40, wait=0.025):
 
 ID_RE = re.compile(r"[A-Za-z0-9_\-]{1,120}")
 _LEDGER_LOCK = threading.Lock()
+_COST_LOCK = threading.RLock()
+
+
+def _atomic_json(path, value):
+    """Publish a complete JSON file; failed writes leave the previous file readable."""
+    tmp = f"{path}.{uuid.uuid4().hex}.tmp"
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(value, f, indent=2, ensure_ascii=False)
+            f.flush()
+            os.fsync(f.fileno())
+        _retry_locked(lambda: os.replace(tmp, path))
+    finally:
+        if os.path.exists(tmp):
+            os.remove(tmp)
+
+
+def _cost_entries(path):
+    if not os.path.isfile(path):
+        return
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            try:
+                entry = json.loads(line)
+                if isinstance(entry, dict):
+                    yield entry
+            except ValueError:  # an interrupted append must not hide the rest of the accounting
+                continue
+
+
+def ensure_asset_identity(state_path, costs_path, asset_id):
+    """Migrate an existing asset once, before moving/renaming it. Historical logs stay untouched.
+
+    The legacy totals travel with the asset, including if its former project is later deleted.
+    New assets set their UUID explicitly and therefore never inherit a reused folder ID's costs.
+    """
+    with _COST_LOCK:
+        state = AssetState.model_validate_json(_retry_locked(lambda: _read_text(state_path)))
+        if not state.asset_uuid:
+            state.asset_uuid = uuid.uuid4().hex
+            totals = {}
+            for entry in _cost_entries(costs_path):
+                if entry.get("asset") == asset_id and not entry.get("asset_uuid"):
+                    month = str(entry.get("time", ""))[:7]
+                    totals[month] = totals.get(month, 0.0) + float(entry.get("usd", 0) or 0)
+            state.legacy_costs = totals
+            _atomic_json(state_path, state.model_dump())
+        return state
 
 
 def ledger_append(ledger, entry):
@@ -47,6 +96,8 @@ def ledger_append(ledger, entry):
     os.makedirs(os.path.dirname(os.path.abspath(ledger)), exist_ok=True)
     with _LEDGER_LOCK, open(ledger, "a", encoding="utf-8") as f:
         f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        f.flush()
+        os.fsync(f.fileno())
 
 
 def ledger_month_spend(ledger, seed_dir=None):
@@ -138,36 +189,58 @@ class Project:
             shutil.copyfile(src, dst)
             refs.append(os.path.relpath(dst, a.dir))
         stored["references"] = refs
-        a.state = AssetState(id=asset_id, inputs=stored, status="new")
+        a.state = AssetState(id=asset_id, asset_uuid=uuid.uuid4().hex, inputs=stored, status="new")
         a.save()
         return a
 
-    _cost_lock = threading.Lock()  # assets may run in parallel threads (benchmarks)
+    _cost_lock = _COST_LOCK  # also serializes the one-time identity migration with cost appends
 
     def log_cost(self, entry):
-        entry = {"time": datetime.datetime.now().isoformat(timespec="seconds"), **entry}
-        with self._cost_lock, open(os.path.join(self.root, "costs.jsonl"), "a", encoding="utf-8") as f:
-            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
-        ledger = self.config.get("budget", {}).get("ledger")
-        if ledger:  # the app's ledger survives deleting this project
-            ledger_append(ledger, {**entry, "project": os.path.basename(self.root)})
+        entry = {"time": datetime.datetime.now().isoformat(timespec="seconds"), "event_id": uuid.uuid4().hex, **entry}
+        with self._cost_lock:
+            aid = entry.get("asset")
+            if isinstance(aid, str) and ID_RE.fullmatch(aid) and os.path.isfile(
+                    os.path.join(self.root, "assets", aid, "state.json")):
+                entry["asset_uuid"] = self.asset(aid).state.asset_uuid
+            ledger = self.config.get("budget", {}).get("ledger")
+            if ledger:  # record in the surviving ledger before writing the project-local mirror
+                ledger_month_spend(ledger, self.config.get("budget", {}).get("monthly_scope_dir"))
+                ledger_append(ledger, {**entry, "project": os.path.basename(self.root)})
+            with open(os.path.join(self.root, "costs.jsonl"), "a", encoding="utf-8") as f:
+                f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+                f.flush()
+                os.fsync(f.fileno())
 
     def cost_total(self, asset_id=None, month=False):
         """USD spent (estimated) in this project; filter by asset and/or the current calendar month."""
-        p = os.path.join(self.root, "costs.jsonl")
-        if not os.path.exists(p):
-            return 0.0
         prefix = datetime.date.today().strftime("%Y-%m") if month else None
-        total = 0.0
-        with open(p, encoding="utf-8") as f:
-            for line in f:
-                e = json.loads(line)
-                if asset_id is not None and e.get("asset") != asset_id:
-                    continue
-                if prefix and not str(e.get("time", "")).startswith(prefix):
-                    continue
-                total += float(e.get("usd", 0) or 0)
-        return total
+        with self._cost_lock:
+            state = None
+            if asset_id is not None and isinstance(asset_id, str) and ID_RE.fullmatch(asset_id) and os.path.isfile(
+                    os.path.join(self.root, "assets", asset_id, "state.json")):
+                state = self.asset(asset_id).state
+            total = (state.legacy_costs.get(prefix, 0.0) if prefix else sum(state.legacy_costs.values())) if state else 0.0
+            paths = [os.path.join(self.root, "costs.jsonl")]
+            ledger = self.config.get("budget", {}).get("ledger")
+            if state and ledger:
+                paths.append(ledger)
+            seen = set()
+            for path in paths:
+                for e in _cost_entries(path):
+                    if state:
+                        if e.get("asset_uuid") != state.asset_uuid:
+                            continue
+                    elif asset_id is not None and e.get("asset") != asset_id:
+                        continue
+                    if prefix and not str(e.get("time", "")).startswith(prefix):
+                        continue
+                    event = e.get("event_id")
+                    if event and event in seen:
+                        continue
+                    if event:
+                        seen.add(event)
+                    total += float(e.get("usd", 0) or 0)
+            return total
 
 
 class Asset:
@@ -183,7 +256,12 @@ class Asset:
         else:
             if not os.path.exists(self.state_path):
                 raise FileNotFoundError(f"no asset '{asset_id}' in {project.root}")
-            self.state = AssetState.model_validate_json(_retry_locked(lambda: _read_text(self.state_path)))
+            self.state = ensure_asset_identity(self.state_path, os.path.join(project.root, "costs.jsonl"), asset_id)
+
+    def reset_cost_identity(self):
+        """A duplicate is new work; call this before saving a copied asset under its new ID."""
+        self.state.asset_uuid = uuid.uuid4().hex
+        self.state.legacy_costs = {}
 
     def save(self):
         # a temp file per writer thread; the swap is retried because on Windows os.replace fails

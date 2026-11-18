@@ -26,6 +26,16 @@ from pixelagent.store import Project  # noqa: E402
 FAKE_KEY = "sk-test-FAKEKEY-0123456789"
 
 
+def _user_content(request):
+    return next(item["content"] for item in request["input"] if item.get("role") == "user")
+
+
+def _request_instructions(request):
+    if "instructions" in request:
+        return request["instructions"]
+    return next(item["content"] for item in request["input"] if item.get("role") == "developer")
+
+
 def _png_b64(seed):
     im, _ = synth.draw_character(seed=seed, size=384, background=(210, 210, 214))
     buf = io.BytesIO()
@@ -59,13 +69,13 @@ class FakeResponses:
     def parse(self, **kw):
         self.log.append(("parse", kw))
         fmt = kw["text_format"]
-        text = kw["input"][0]["content"][0]["text"]
+        text = next(part["text"] for part in _user_content(kw) if part["type"] == "input_text")
         if fmt is RegionPlan:
             out = RegionPlan(regions=[Region(name="face", x=8, y=4, w=10, h=8, goal="readable eyes")])
             return NS(output_parsed=out, usage=NS(input_tokens=1000, output_tokens=200))
         if fmt is RegionVariants:
             n = int(re.search(r"Return exactly (\d+) different variants", text).group(1))
-            out = RegionVariants(variants=[_fake_region_edit(kw["instructions"], k) for k in range(n)])
+            out = RegionVariants(variants=[_fake_region_edit(_request_instructions(kw), k) for k in range(n)])
             return NS(output_parsed=out, usage=NS(input_tokens=1000, output_tokens=200))
         if fmt is Critique:
             out = self.critiques[min(self.n_crit, len(self.critiques) - 1)]
@@ -179,16 +189,16 @@ class OpenAIBackendTests(unittest.TestCase):
         for kw in parses:
             by_fmt.setdefault(kw["text_format"].__name__, []).append(kw["model"])
         # the cluster labeller is skipped with a usable map; detail = plan + 3 candidates + 1 region pick
-        self.assertEqual(by_fmt, {"CharacterSpec": ["gpt-6.1-sol"], "MaterialList": ["gpt-6.1-sol"],
-                                  "Pick": ["gpt-6.1-terra", "gpt-6.1-terra"], "RegionPlan": ["gpt-6.1-sol"],
-                                  "RegionVariants": ["gpt-6.1-sol"], "Critique": ["gpt-6.1-terra"]})
+        self.assertEqual(by_fmt, {"CharacterSpec": ["gpt-6.2-sol"], "MaterialList": ["gpt-6.2-sol"],
+                                  "Pick": ["gpt-6.1-terra", "gpt-6.1-terra"], "RegionPlan": ["gpt-6.2-sol"],
+                                  "RegionVariants": ["gpt-6.2-sol"], "Critique": ["gpt-6.1-terra"]})
         self.assertEqual(parses[0]["reasoning"], {"effort": "medium"})
-        pick_imgs = [c for c in parses[2]["input"][0]["content"] if c["type"] == "input_image"]
+        pick_imgs = [c for c in _user_content(parses[2]) if c["type"] == "input_image"]
         self.assertTrue(pick_imgs and pick_imgs[0]["image_url"].startswith("data:image/png;base64,"))
         edit = [kw for kw in parses if kw["text_format"] is RegionVariants][0]
-        self.assertIn("Return exactly 3 different variants", edit["input"][0]["content"][0]["text"])
-        self.assertEqual(len([c for c in edit["input"][0]["content"] if c["type"] == "input_image"]), 3)  # context, region, concept
-        critic_imgs = [c for c in parses[-1]["input"][0]["content"] if c["type"] == "input_image"]
+        self.assertIn("Return exactly 3 different variants", _user_content(edit)[0]["text"])
+        self.assertEqual(len([c for c in _user_content(edit) if c["type"] == "input_image"]), 3)  # context, region, concept
+        critic_imgs = [c for c in _user_content(parses[-1]) if c["type"] == "input_image"]
         self.assertEqual(len(critic_imgs), 3)
         edits = [kw for name, kw in calls if name == "edit"]
         self.assertEqual(len(edits), 1)
@@ -211,7 +221,7 @@ class OpenAIBackendTests(unittest.TestCase):
         # costs: 7 text calls (one call per detail region for all variants) + 2 image calls
         costs = [json.loads(l) for l in rd(os.path.join(self.root, "costs.jsonl")).splitlines()]
         self.assertEqual(len(costs), 9)
-        sol = [c for c in costs if c["model"] == "gpt-6.1-sol"][0]
+        sol = [c for c in costs if c["model"] == "gpt-6.2-sol"][0]
         self.assertAlmostEqual(sol["usd"], (1000 * 2 + 200 * 10) / 1e6, places=6)
         img = [c for c in costs if c["kind"] == "image"][0]
         self.assertAlmostEqual(img["usd"], (100 * 5 + 4000 * 30) / 1e6, places=6)
@@ -230,7 +240,7 @@ class OpenAIBackendTests(unittest.TestCase):
         self.assertEqual(info["sources"], ["reference", "reference redrawn"])
         self.assertTrue(info.get("refined"))
         intake = [kw for name, kw in self.client.log if name == "parse"][0]
-        self.assertTrue(any(c["type"] == "input_image" for c in intake["input"][0]["content"]))
+        self.assertTrue(any(c["type"] == "input_image" for c in _user_content(intake)))
 
     def test_references_with_scenery_are_redrawn_and_wait_for_approval(self):
         # a reference with scenery (typical illustrations) used to be converted whole, background and all

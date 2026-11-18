@@ -11,12 +11,14 @@ def _native(ctx):
     from ..pixelart import sprite_from_pixel_art
     concept = imaging.load_rgba(ctx.input("concept", "concept"))
     fix = ctx.asset.state.inputs.get("concept_fix") or {}
-    keep = fix.get("grid") if fix.get("box") else None    # an area revision keeps the grid
+    keep = fix.get("geom") if fix.get("box") else None    # keep crop, size and origin as well as the grid
+    if fix.get("box") and not keep:
+        raise ValueError("cannot align the area edit: the original sprite geometry is missing")
     from .concept import BLOCK
     crec = ctx.asset.state.steps.get("concept")
     block = (crec.info or {}).get("block") if crec else None     # objects are drawn with bigger blocks
     margin = int(ctx.style["canvas_margin"])
-    canvas, geom = sprite_from_pixel_art(concept, margin, grid=keep, expected=block or BLOCK)
+    canvas, geom = sprite_from_pixel_art(concept, margin, geometry=keep, expected=block or BLOCK)
     bb = canvas.getbbox()
     spec = ctx.spec()
     if spec.asset_type == "prop" and bb and not keep:

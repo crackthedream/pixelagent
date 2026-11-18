@@ -9,8 +9,14 @@ import os
 import time
 
 from .openai_backend import image_data_url
+from .metering import check_usage_guard, price_profile, record_usage, request_error, response_settings, usage_price
 
 DEFAULT_TOOLS = ("palette", "draw", "layer", "view", "lint", "undo", "redo", "compare_reference", "canvas")
+
+
+def interrupted(reason):
+    """The loop stopped before completing its phase (shared by phase and pipeline callers)."""
+    return reason == "cancelled" or reason.startswith("stopped:")
 
 
 def _schema(tool):
@@ -28,6 +34,8 @@ class AgentSession:
         self.max_usd, self.log = max_usd, log
         self.on_round = on_round  # called as on_round(session, phase) after each round of tool calls (live preview)
         self.spent, self.turns, self.prev, self.pending = 0.0, 0, None, []
+        self._response_model = None
+        self._metering_state = {}
         self.transcript = open(os.path.join(out_dir, transcript_name), "a", encoding="utf-8")
         self.tools = [{"type": "function", "name": t["name"], "description": t["description"][:1024],
                        "parameters": _schema(t), "strict": False} for t in mcp.tools() if t["name"] in self.allowed]
@@ -39,10 +47,7 @@ class AgentSession:
         self.transcript.close()
 
     def _price(self, usage):
-        p = self.project.config.get("pricing", {}).get(self.model, {})
-        if usage is None:
-            return 0.0
-        return (usage.input_tokens * p.get("input", 0) + usage.output_tokens * p.get("output", 0)) / 1e6
+        return usage_price(price_profile(self.project.config, self.model, "llm"), usage, "llm")
 
     def save_imgs(self, imgs, tag):
         """One file per image. The name carries a per-session sequence number: two calls of the same tool in one
@@ -112,6 +117,8 @@ class AgentSession:
         Returns (stop reason, finish summary)."""
         if fresh:
             self.prev, self.pending = None, []
+        if self.prev and self._response_model != self.model:
+            raise ValueError("The drawing model changed; start a fresh session before continuing this conversation.")
         items = list(self.pending) + [{"role": "user", "content": content}]
         self.pending = []
         n, finished = 0, None
@@ -121,28 +128,37 @@ class AgentSession:
             if cancel.requested(self.project.root, self.asset_id):  # the user cancelled: stop before the next call
                 self.pending = items if n else []
                 return "cancelled", None
+            if self.spent >= self.max_usd:
+                self.pending = items if n else []
+                return f"stopped: local budget ${self.max_usd:.2f} reached", None
             problem = budget_problem(self.project, self.asset_id)
             if problem:  # stop cleanly: the drawing so far is kept and exported by the caller
                 self.pending = items if n else []
                 return f"stopped: {problem}", None
+            pricing = price_profile(self.project.config, self.model, "llm")
+            check_usage_guard(self._metering_state)
             n += 1
             self.turns += 1
+            # Phase instructions change between draw/face/revision. In 6.2 they are appended to the
+            # current input and are NOT inherited through previous_response_id: resend every round.
             kwargs = dict(model=self.model, instructions=instructions, input=items, tools=self.tools,
-                          reasoning={"effort": self.effort}, parallel_tool_calls=True)
+                          parallel_tool_calls=True, **response_settings(self.model, self.effort))
             if self.prev:
                 kwargs["previous_response_id"] = self.prev
             t = time.perf_counter()
-            resp = self.client.responses.create(**kwargs)
+            try:
+                resp = self.client.responses.create(**kwargs)
+            except Exception as e:
+                self.project.log_cost({"asset": self.asset_id, "kind": "llm", "role": "artist", "phase": phase,
+                                       "model": self.model, "usd": 0.0, "error": type(e).__name__})
+                raise request_error(e) from None
             self.prev = resp.id
+            self._response_model = self.model
             usage = getattr(resp, "usage", None)
-            usd = self._price(usage)
+            usd = record_usage(self.project, self.asset_id, self.model, "llm", "artist", usage, pricing,
+                               guard=self._metering_state, phase=phase, service_tier=getattr(resp, "service_tier", None),
+                               ms=int((time.perf_counter() - t) * 1000))
             self.spent += usd
-            cached = getattr(getattr(usage, "input_tokens_details", None), "cached_tokens", None) if usage else None
-            self.project.log_cost({"asset": self.asset_id, "kind": "llm", "role": "artist", "phase": phase,
-                                   "model": self.model, "usd": round(usd, 5),
-                                   "input_tokens": getattr(usage, "input_tokens", None), "cached_tokens": cached,
-                                   "output_tokens": getattr(usage, "output_tokens", None),
-                                   "ms": int((time.perf_counter() - t) * 1000)})
             calls = [o for o in resp.output if getattr(o, "type", None) == "function_call"]
             said = " ".join(getattr(c, "text", "") for o in resp.output if getattr(o, "type", None) == "message"
                             for c in getattr(o, "content", []) or [])
@@ -187,6 +203,7 @@ class AgentSession:
                 self.pending = items  # outputs for the last calls go with the next message of this conversation
                 return "finished", finished
             if self.spent >= self.max_usd:
-                return f"budget ${self.max_usd:.2f} reached", None
+                self.pending = items
+                return f"stopped: local budget ${self.max_usd:.2f} reached", None
         self.pending = items
-        return f"turn limit {limit} reached", None
+        return f"stopped: turn limit {limit} reached", None

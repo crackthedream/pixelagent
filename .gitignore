@@ -17,3 +17,8 @@ dist/
 packaging/PixelAgent.ico
 benchmarks/face_lab_runs/
 benchmarks/refs/owner/
+
+# Local Python environment and personal credentials
+.venv/
+.env.*
+!.env.example

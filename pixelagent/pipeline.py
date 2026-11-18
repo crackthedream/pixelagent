@@ -160,9 +160,9 @@ class Pipeline:
                         "time": os.path.getmtime(vdir), "current": rel_dir == cur_dir})
         now = self.upstream(name)
         for v in out:
-            # usable now only if made from the same plan, concept, traces... as the current one; versions made
-            # before this was recorded (no 'upstream') are accepted only when they are the current one
-            v["compatible"] = v["current"] or (v["upstream"] is not None and v["upstream"] == now)
+            # Selection is not provenance: a reset keeps the old output directory while its inputs change.
+            # Legacy outputs remain viewable, but cannot be restored without evidence of their dependencies.
+            v["compatible"] = v["upstream"] is not None and v["upstream"] == now
         return out
 
     def restore_version(self, name, version):
