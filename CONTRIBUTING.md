@@ -17,9 +17,9 @@ py -3.13 -m venv .venv
 
 The lock includes the OpenAI SDK and PyInstaller. Run the commands below from the repository root; installing PixelAgent itself is not required for this workflow. Keep the virtual environment out of commits.
 
-The source application and several offline tests also need the PixelLiner MCP engine. That engine repository is currently private: source development and builds require authorized access. Public users can run the packaged Windows executable, which includes the engine; source availability alone does not grant access to the separate engine repository.
+The source application and several offline tests also need the separately maintained [PixelLiner MCP engine](https://github.com/crackthedream/pixelliner-mcp). Its [v1.1.0 source release](https://github.com/crackthedream/pixelliner-mcp/releases/tag/v1.1.0) is public, with project-owned source and documentation under its own [MIT License](https://github.com/crackthedream/pixelliner-mcp/blob/v1.1.0/LICENSE). The packaged Windows executable already includes the engine.
 
-If you have engine access, obtain the repository identified by `packaging/engine-lock.json` and use the exact commit recorded there. The default source configuration expects that checkout at `~/pixelliner-mcp`:
+For this application's tested setup, use the exact commit in `packaging/engine-lock.json`, currently `0c24db40e84d797fb2418444ecb96184fb53231b`. The existing Windows alpha remains pinned to that earlier engine; the standalone v1.1.0 release does not upgrade it. The default source configuration expects the pinned checkout at `~/pixelliner-mcp`:
 
 ```powershell
 $engineDir = Join-Path $env:USERPROFILE 'pixelliner-mcp'
@@ -28,7 +28,7 @@ git clone https://github.com/crackthedream/pixelliner-mcp.git $engineDir
 git -C $engineDir checkout --detach $engineLock.commit
 ```
 
-These commands assume that destination does not already exist. Preserve existing engine work; use another checkout if necessary. For a different location, set `[engine] path` in your local `config.toml` for source runs/tests, and set `PIXELLINER_ENGINE` for packaging. Do not commit machine-specific paths. Engine access and redistribution are subject to that repository's own terms.
+These commands assume that destination does not already exist. Preserve existing engine work; use another checkout if necessary. For a different location, set `[engine] path` in your local `config.toml` for source runs/tests, and set `PIXELLINER_ENGINE` for packaging. Do not commit machine-specific paths. Consult [DISTRIBUTION.md](DISTRIBUTION.md) for the distinction between the earlier Windows bundle's notices and the current standalone engine license.
 
 ## Tests and local runs
 
